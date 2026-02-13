@@ -1,3 +1,263 @@
-# OpenClaw Plugin Claude Code
+# OpenClaw Plugin: Claude Code
 
-OpenClaw Plugin for running containerized Claude Code in Podman or Docker 
+An [OpenClaw](https://openclaw.ai) plugin that runs Claude Code CLI sessions in isolated Podman (or Docker) containers. This enables OpenClaw agents to delegate complex coding tasks to Claude Code while maintaining security through containerization.
+
+## Features
+
+- **Isolated Execution**: Each Claude Code session runs in its own container with dropped capabilities
+- **Session Persistence**: Sessions maintain state across multiple interactions
+- **Dual Authentication**: Supports both API key and OAuth/Claude Max credentials
+- **Resource Limits**: Configurable memory, CPU, and PID limits
+- **AppArmor Support**: Optional AppArmor profile for additional security hardening
+- **Automatic Cleanup**: Idle sessions are automatically cleaned up
+
+## Requirements
+
+- [OpenClaw](https://openclaw.ai) >= 2025.1.0
+- [Podman](https://podman.io) (recommended) or Docker
+- Node.js >= 22
+
+## Installation
+
+### From npm
+
+```bash
+openclaw plugins install @13rac1/openclaw-plugin-claude-code
+```
+
+### From GitHub
+
+```bash
+openclaw plugins install https://github.com/13rac1/openclaw-plugin-claude-code
+```
+
+### Container Image
+
+The plugin requires a container image with Claude Code CLI installed. Pull the pre-built image:
+
+```bash
+podman pull ghcr.io/13rac1/openclaw-claude-code:latest
+```
+
+Or build it yourself:
+
+```bash
+podman build -t ghcr.io/13rac1/openclaw-claude-code:latest .
+```
+
+## Configuration
+
+Add to your `openclaw.json`:
+
+```json
+{
+  "plugins": {
+    "enabled": true,
+    "load": {
+      "paths": ["path/to/dist/index.js"]
+    },
+    "entries": {
+      "claude-code": {
+        "enabled": true,
+        "config": {
+          "image": "ghcr.io/13rac1/openclaw-claude-code:latest",
+          "runtime": "podman",
+          "startupTimeout": 30,
+          "idleTimeout": 120,
+          "memory": "512m",
+          "cpus": "1.0",
+          "network": "bridge",
+          "sessionsDir": "~/.openclaw/claude-sessions",
+          "workspacesDir": "~/.openclaw/workspaces",
+          "sessionIdleTimeout": 3600
+        }
+      }
+    }
+  }
+}
+```
+
+### Configuration Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `image` | string | `ghcr.io/13rac1/openclaw-claude-code:latest` | Container image for Claude Code |
+| `runtime` | string | `podman` | Container runtime (`podman` or `docker`) |
+| `startupTimeout` | number | `30` | Seconds to wait for container to produce first output |
+| `idleTimeout` | number | `120` | Kill container after this many seconds of no output |
+| `memory` | string | `512m` | Memory limit for containers |
+| `cpus` | string | `1.0` | CPU limit for containers |
+| `network` | string | `bridge` | Network mode (`none`, `bridge`, `host`) |
+| `sessionsDir` | string | `~/.openclaw/claude-sessions` | Directory for session metadata |
+| `workspacesDir` | string | `~/.openclaw/workspaces` | Directory for session workspaces |
+| `sessionIdleTimeout` | number | `3600` | Cleanup idle sessions after this many seconds |
+| `apparmorProfile` | string | `""` | AppArmor profile name (empty = disabled) |
+
+## Authentication
+
+The plugin supports two authentication methods:
+
+### 1. OAuth / Claude Max (Recommended)
+
+If you have Claude Max or enterprise OAuth credentials, place your credentials file at:
+
+```
+~/.claude/.credentials.json
+```
+
+The plugin will automatically copy this file into each container session.
+
+### 2. API Key
+
+Set the `ANTHROPIC_API_KEY` environment variable:
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+```
+
+**Note**: If both are available, OAuth credentials take precedence.
+
+## Registered Tools
+
+### `claude_code`
+
+Execute a prompt using Claude Code CLI in an isolated container.
+
+**Parameters:**
+- `prompt` (required): The task or prompt to send to Claude Code
+- `session_id` (optional): Session ID to continue a previous session
+
+**Example:**
+```
+Use claude_code to refactor the authentication module to use JWT tokens
+```
+
+### `claude_code_cleanup`
+
+Clean up idle Claude Code sessions.
+
+**Parameters:** None
+
+## Security
+
+The plugin implements multiple layers of security:
+
+1. **Rootless Containers**: Uses Podman rootless mode by default
+2. **Capability Dropping**: All Linux capabilities are dropped (`--cap-drop ALL`)
+3. **Resource Limits**: Memory, CPU, and PID limits prevent resource exhaustion
+4. **tmpfs with noexec**: `/tmp` is mounted as tmpfs with `noexec,nosuid`
+5. **Network Isolation**: Configurable network mode (can be set to `none`)
+6. **AppArmor**: Optional AppArmor profile support for MAC enforcement
+
+## Development
+
+### Setup
+
+```bash
+git clone https://github.com/13rac1/openclaw-plugin-claude-code.git
+cd openclaw-plugin-claude-code
+npm install
+```
+
+### Build
+
+```bash
+npm run build
+```
+
+### Test
+
+```bash
+# Unit tests (mocked)
+npm test
+
+# Integration tests (requires Podman)
+npm run test:integration
+
+# All tests
+npm run test:all
+```
+
+### Local Development
+
+Link the plugin for development:
+
+```bash
+openclaw plugins install -l ./path/to/openclaw-plugin-claude-code
+```
+
+## Container Image
+
+The included Dockerfile creates a Debian Bookworm-based image with:
+
+- Node.js 22
+- Claude Code CLI (npm global)
+- Go 1.22.5 + TinyGo 0.32.0
+- Python 3 with venv
+- Common dev tools: git, ripgrep, jq, curl
+
+### Building Multi-arch Images
+
+```bash
+# Single architecture (current)
+podman build -t ghcr.io/13rac1/openclaw-claude-code:latest .
+
+# Multi-architecture (arm64 + amd64)
+GITHUB_USERNAME=13rac1 ./scripts/build-and-push.sh --multi-arch
+```
+
+## Troubleshooting
+
+### Container image not found
+
+```
+Error: Container image not found: ghcr.io/13rac1/openclaw-claude-code:latest
+```
+
+Pull or build the container image:
+
+```bash
+podman pull ghcr.io/13rac1/openclaw-claude-code:latest
+```
+
+### No authentication available
+
+```
+Error: No authentication available. Set ANTHROPIC_API_KEY or have ~/.claude/.credentials.json
+```
+
+Either:
+1. Set `ANTHROPIC_API_KEY` environment variable, or
+2. Place OAuth credentials at `~/.claude/.credentials.json`
+
+### Startup timeout
+
+```
+Error: startup_timeout - No output within 30 seconds
+```
+
+The container failed to start or produce output. Check:
+- Container image is valid
+- Sufficient system resources
+- Network connectivity (if `network: bridge`)
+
+Increase `startupTimeout` if needed.
+
+### Idle timeout
+
+```
+Error: idle_timeout - No output for 120 seconds
+```
+
+Claude Code stopped producing output. This may indicate:
+- Task completed but output wasn't captured
+- Claude Code is stuck
+- Task requires more time (increase `idleTimeout`)
+
+## License
+
+Apache-2.0 - see [LICENSE](LICENSE)
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md)

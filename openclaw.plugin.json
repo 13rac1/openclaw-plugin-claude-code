@@ -1,0 +1,82 @@
+{
+  "id": "claude-code",
+  "version": "1.0.0",
+  "description": "Run Claude Code sessions in isolated Podman containers",
+  "main": "dist/index.js",
+  "tools": ["claude_code", "claude_code_cleanup"],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "image": {
+        "type": "string",
+        "default": "ghcr.io/13rac1/openclaw-claude-code:latest",
+        "description": "Container image for Claude Code sessions"
+      },
+      "runtime": {
+        "type": "string",
+        "default": "podman",
+        "description": "Container runtime (podman or docker)"
+      },
+      "startupTimeout": {
+        "type": "number",
+        "default": 30,
+        "description": "Seconds to wait for container to produce first output"
+      },
+      "idleTimeout": {
+        "type": "number",
+        "default": 120,
+        "description": "Kill container after this many seconds of no output (hung detection)"
+      },
+      "memory": {
+        "type": "string",
+        "default": "512m",
+        "description": "Memory limit for containers"
+      },
+      "cpus": {
+        "type": "string",
+        "default": "1.0",
+        "description": "CPU limit for containers"
+      },
+      "sessionsDir": {
+        "type": "string",
+        "default": "~/.openclaw/claude-sessions",
+        "description": "Directory for session data"
+      },
+      "workspacesDir": {
+        "type": "string",
+        "default": "~/.openclaw/workspaces",
+        "description": "Directory for session workspaces"
+      },
+      "network": {
+        "type": "string",
+        "default": "bridge",
+        "description": "Container network mode (none, bridge, host)"
+      },
+      "sessionIdleTimeout": {
+        "type": "number",
+        "default": 3600,
+        "description": "Cleanup idle sessions after this many seconds"
+      },
+      "apparmorProfile": {
+        "type": "string",
+        "default": "",
+        "description": "AppArmor profile name for containers (empty = disabled)"
+      }
+    }
+  },
+  "uiHints": {
+    "image": { "label": "Container Image" },
+    "runtime": { "label": "Container Runtime" },
+    "startupTimeout": { "label": "Startup Timeout (seconds)" },
+    "idleTimeout": { "label": "Idle Timeout (seconds)" },
+    "memory": { "label": "Memory Limit" },
+    "cpus": { "label": "CPU Limit" },
+    "network": { "label": "Network Mode" },
+    "sessionIdleTimeout": { "label": "Session Cleanup Timeout (seconds)" },
+    "apparmorProfile": { "label": "AppArmor Profile" }
+  },
+  "requires": {
+    "bins": ["podman"]
+  }
+}

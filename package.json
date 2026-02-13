@@ -1,0 +1,62 @@
+{
+  "name": "@13rac1/openclaw-plugin-claude-code",
+  "version": "1.0.0",
+  "description": "OpenClaw plugin for running Claude Code CLI in isolated Podman containers",
+  "type": "module",
+  "license": "Apache-2.0",
+  "author": "Bradley Erickson",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/13rac1/openclaw-plugin-claude-code.git"
+  },
+  "bugs": {
+    "url": "https://github.com/13rac1/openclaw-plugin-claude-code/issues"
+  },
+  "homepage": "https://github.com/13rac1/openclaw-plugin-claude-code#readme",
+  "keywords": [
+    "openclaw",
+    "plugin",
+    "claude",
+    "claude-code",
+    "podman",
+    "container"
+  ],
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "openclaw.plugin.json"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "test": "vitest run --config vitest.config.ts",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:all": "npm test && npm run test:integration",
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run clean && npm run build"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2025.1.0"
+  },
+  "dependencies": {
+    "@sinclair/typebox": "^0.34.48"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "openclaw": {
+    "extensions": ["./dist/index.js"]
+  }
+}
