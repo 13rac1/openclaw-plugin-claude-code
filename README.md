@@ -206,6 +206,35 @@ podman build -t ghcr.io/13rac1/openclaw-claude-code:latest .
 GITHUB_USERNAME=13rac1 ./scripts/build-and-push.sh --multi-arch
 ```
 
+## Releasing
+
+Releases are automated via GitHub Actions when a version tag is pushed.
+
+### Prerequisites
+
+1. Configure `NPM_TOKEN` secret in GitHub repository settings
+2. Ensure you have push access to the repository
+
+### Release Process
+
+1. Update version in `package.json`
+2. Update `CHANGELOG.md` with release notes
+3. Commit the changes:
+   ```bash
+   git add package.json CHANGELOG.md
+   git commit -m "chore: release v1.x.x"
+   ```
+4. Create and push a version tag:
+   ```bash
+   git tag v1.x.x
+   git push origin main --tags
+   ```
+
+The release workflow will automatically:
+- Run tests
+- Publish to npm with provenance
+- Build and push multi-arch container images to ghcr.io
+
 ## Troubleshooting
 
 ### Container image not found
