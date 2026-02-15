@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { PodmanRunner, PodmanConfig, ClaudeCodeResult, ErrorType } from "./podman-runner";
-import { spawn, ChildProcess } from "node:child_process";
+import type { PodmanConfig } from "./podman-runner";
+import { PodmanRunner } from "./podman-runner";
+import type { ChildProcess } from "node:child_process";
+import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 
 vi.mock("node:child_process", () => ({
@@ -134,8 +136,7 @@ describe("PodmanRunner", () => {
       );
 
       const volumeArgs = args.filter(
-        (arg: string) =>
-          arg.includes(":/home/claude/.claude") || arg.includes(":/workspace")
+        (arg: string) => arg.includes(":/home/claude/.claude") || arg.includes(":/workspace")
       );
       expect(volumeArgs).toHaveLength(2);
       volumeArgs.forEach((arg: string) => {
@@ -179,8 +180,7 @@ describe("PodmanRunner", () => {
     });
 
     it("handles multiline output with JSON on last line", () => {
-      const output =
-        'Some debug output\nMore output\n{"result": "Final", "session_id": "sess1"}';
+      const output = 'Some debug output\nMore output\n{"result": "Final", "session_id": "sess1"}';
       const result = (runner as any).parseOutput(output, 0);
 
       expect(result).toEqual({
@@ -214,10 +214,7 @@ describe("PodmanRunner", () => {
       const mockProc = createMockProcess();
       mockSpawn.mockReturnValue(mockProc);
 
-      const executePromise = (runner as any).execute(
-        ["run", "--rm", "test"],
-        "test-container"
-      );
+      const executePromise = (runner as any).execute(["run", "--rm", "test"], "test-container");
 
       // Emit output synchronously before advancing timers
       (mockProc.stdout as EventEmitter).emit("data", Buffer.from("output"));
@@ -514,13 +511,9 @@ describe("PodmanRunner", () => {
       expect(mockSpawn).toHaveBeenCalledWith("podman", ["kill", "claude-user-123"], {
         stdio: "ignore",
       });
-      expect(mockSpawn).toHaveBeenCalledWith(
-        "podman",
-        ["rm", "-f", "claude-user-123"],
-        {
-          stdio: "ignore",
-        }
-      );
+      expect(mockSpawn).toHaveBeenCalledWith("podman", ["rm", "-f", "claude-user-123"], {
+        stdio: "ignore",
+      });
     });
 
     it("resolves even on error", async () => {
@@ -589,16 +582,12 @@ describe("PodmanRunner", () => {
       const result = await runPromise;
 
       // Verify cleanup was called
-      expect(mockSpawn).toHaveBeenCalledWith(
-        "podman",
-        ["kill", "claude-test-session"],
-        { stdio: "ignore" }
-      );
-      expect(mockSpawn).toHaveBeenCalledWith(
-        "podman",
-        ["rm", "-f", "claude-test-session"],
-        { stdio: "ignore" }
-      );
+      expect(mockSpawn).toHaveBeenCalledWith("podman", ["kill", "claude-test-session"], {
+        stdio: "ignore",
+      });
+      expect(mockSpawn).toHaveBeenCalledWith("podman", ["rm", "-f", "claude-test-session"], {
+        stdio: "ignore",
+      });
 
       expect(result.content).toBe("Hi!");
       expect(result.sessionId).toBe("new-sess");
@@ -625,11 +614,9 @@ describe("PodmanRunner", () => {
       const result = await verifyPromise;
 
       expect(result).toBe(true);
-      expect(mockSpawn).toHaveBeenCalledWith(
-        "podman",
-        ["container", "exists", "test-container"],
-        { stdio: "ignore" }
-      );
+      expect(mockSpawn).toHaveBeenCalledWith("podman", ["container", "exists", "test-container"], {
+        stdio: "ignore",
+      });
 
       vi.useFakeTimers();
     });
@@ -638,11 +625,7 @@ describe("PodmanRunner", () => {
       // This test needs real timers due to async promise chains with setTimeout
       vi.useRealTimers();
 
-      const mockProcs = [
-        createMockProcess(),
-        createMockProcess(),
-        createMockProcess(),
-      ];
+      const mockProcs = [createMockProcess(), createMockProcess(), createMockProcess()];
 
       // Use mockImplementation to emit close right after spawn returns
       let spawnCount = 0;

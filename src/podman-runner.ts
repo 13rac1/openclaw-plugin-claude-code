@@ -1,4 +1,4 @@
-import { spawn, ChildProcess } from "node:child_process";
+import { spawn } from "node:child_process";
 
 export interface PodmanConfig {
   runtime: string;
@@ -12,12 +12,7 @@ export interface PodmanConfig {
   maxOutputSize: number; // Maximum output size in bytes (0 = unlimited)
 }
 
-export type ErrorType =
-  | "startup_timeout"
-  | "idle_timeout"
-  | "oom"
-  | "crash"
-  | "spawn_failed";
+export type ErrorType = "startup_timeout" | "idle_timeout" | "oom" | "crash" | "spawn_failed";
 
 export interface ResourceMetrics {
   memoryUsageMB?: number;
@@ -35,6 +30,33 @@ export interface ClaudeCodeResult {
   outputTruncated?: boolean;
   originalSize?: number;
   metrics?: ResourceMetrics;
+}
+
+// Type for parsed Claude Code JSON output
+interface ClaudeCodeOutput {
+  result?: string;
+  content?: string;
+  message?: string;
+  session_id?: string;
+  sessionId?: string;
+}
+
+// Type for podman stats JSON output
+interface PodmanStatsOutput {
+  MemUsage?: string;
+  mem_usage?: string;
+  MemLimit?: string;
+  mem_limit?: string;
+  MemPerc?: string | number;
+  CPUPerc?: string | number;
+}
+
+function isClaudeCodeOutput(value: unknown): value is ClaudeCodeOutput {
+  return typeof value === "object" && value !== null;
+}
+
+function isPodmanStatsOutput(value: unknown): value is PodmanStatsOutput {
+  return typeof value === "object" && value !== null;
 }
 
 export class PodmanRunner {
@@ -74,9 +96,7 @@ export class PodmanRunner {
   ): string[] {
     // Build the claude command to run inside bash
     // Claude doesn't output when run as PID 1, must run through bash
-    const resumeFlag = params.resumeSessionId
-      ? `--resume '${params.resumeSessionId}'`
-      : "";
+    const resumeFlag = params.resumeSessionId ? `--resume '${params.resumeSessionId}'` : "";
     const escapedPrompt = params.prompt.replace(/'/g, "'\\''");
     const claudeCmd = `claude --print --dangerously-skip-permissions ${resumeFlag} -p '${escapedPrompt}' < /dev/null 2>&1`;
 
@@ -118,23 +138,12 @@ export class PodmanRunner {
       args.push("-e", `ANTHROPIC_API_KEY=${params.apiKey}`);
     }
 
-    args.push(
-      "-w",
-      "/workspace",
-      "--entrypoint",
-      "/bin/bash",
-      this.config.image,
-      "-c",
-      claudeCmd
-    );
+    args.push("-w", "/workspace", "--entrypoint", "/bin/bash", this.config.image, "-c", claudeCmd);
 
     return args;
   }
 
-  private execute(
-    args: string[],
-    containerName: string
-  ): Promise<ClaudeCodeResult> {
+  private execute(args: string[], containerName: string): Promise<ClaudeCodeResult> {
     return new Promise((resolve, reject) => {
       const startTime = Date.now();
       const proc = spawn(this.config.runtime, args, {
@@ -152,13 +161,13 @@ export class PodmanRunner {
       const maxSize = this.config.maxOutputSize;
       let lastMetrics: ResourceMetrics | undefined;
 
-      const cleanup = () => {
+      const cleanup = (): void => {
         clearTimeout(startupTimeoutId);
         clearInterval(idleCheckInterval);
         clearInterval(metricsInterval);
       };
 
-      const killProcess = (reason: ErrorType) => {
+      const killProcess = (reason: ErrorType): void => {
         if (killed) return;
         killed = true;
         killReason = reason;
@@ -189,15 +198,16 @@ export class PodmanRunner {
       }, 5000);
 
       // Periodically sample container metrics (every 10s)
-      const metricsInterval = setInterval(async () => {
+      const metricsInterval = setInterval(() => {
         if (!hadOutput) return; // Container not started yet
-        const metrics = await this.getContainerStats(containerName);
-        if (metrics) {
-          lastMetrics = metrics;
-        }
+        void this.getContainerStats(containerName).then((metrics) => {
+          if (metrics) {
+            lastMetrics = metrics;
+          }
+        });
       }, 10000);
 
-      const onOutput = () => {
+      const onOutput = (): void => {
         if (!hadOutput) {
           hadOutput = true;
           clearTimeout(startupTimeoutId);
@@ -241,12 +251,10 @@ export class PodmanRunner {
         cleanup();
         const elapsed = (Date.now() - startTime) / 1000;
         reject(
-          Object.assign(
-            new Error(
-              `Failed to spawn ${this.config.runtime}: ${err.message}`
-            ),
-            { errorType: "spawn_failed" as ErrorType, elapsedSeconds: elapsed }
-          )
+          Object.assign(new Error(`Failed to spawn ${this.config.runtime}: ${err.message}`), {
+            errorType: "spawn_failed" as ErrorType,
+            elapsedSeconds: elapsed,
+          })
         );
       });
 
@@ -257,8 +265,8 @@ export class PodmanRunner {
         if (killed && killReason) {
           const message =
             killReason === "startup_timeout"
-              ? `Container startup timeout (no output for ${this.config.startupTimeout}s)`
-              : `Container idle timeout (no output for ${this.config.idleTimeout}s) after ${elapsed.toFixed(1)}s total`;
+              ? `Container startup timeout (no output for ${String(this.config.startupTimeout)}s)`
+              : `Container idle timeout (no output for ${String(this.config.idleTimeout)}s) after ${elapsed.toFixed(1)}s total`;
           reject(
             Object.assign(new Error(message), {
               errorType: killReason,
@@ -284,7 +292,7 @@ export class PodmanRunner {
           reject(
             Object.assign(
               new Error(
-                `Container failed (exit ${code}) after ${elapsed.toFixed(1)}s: ${stderr || stdout}`
+                `Container failed (exit ${String(code)}) after ${elapsed.toFixed(1)}s: ${stderr || stdout}`
               ),
               { errorType: "crash" as ErrorType, elapsedSeconds: elapsed }
             )
@@ -292,7 +300,7 @@ export class PodmanRunner {
           return;
         }
 
-        const result = this.parseOutput(stdout, code ?? 0);
+        const result = this.parseOutput(stdout, code);
         result.elapsedSeconds = elapsed;
         if (outputTruncated) {
           result.outputTruncated = true;
@@ -314,12 +322,14 @@ export class PodmanRunner {
       for (let i = lines.length - 1; i >= 0; i--) {
         const line = lines[i].trim();
         if (line.startsWith("{") && line.endsWith("}")) {
-          const parsed = JSON.parse(line);
-          return {
-            content: parsed.result || parsed.content || parsed.message || output,
-            sessionId: parsed.session_id || parsed.sessionId || null,
-            exitCode,
-          };
+          const parsed: unknown = JSON.parse(line);
+          if (isClaudeCodeOutput(parsed)) {
+            return {
+              content: parsed.result ?? parsed.content ?? parsed.message ?? output,
+              sessionId: parsed.session_id ?? parsed.sessionId ?? null,
+              exitCode,
+            };
+          }
         }
       }
     } catch {
@@ -335,13 +345,9 @@ export class PodmanRunner {
 
   async checkImage(): Promise<boolean> {
     return new Promise((resolve) => {
-      const proc = spawn(
-        this.config.runtime,
-        ["image", "exists", this.config.image],
-        {
-          stdio: "ignore",
-        }
-      );
+      const proc = spawn(this.config.runtime, ["image", "exists", this.config.image], {
+        stdio: "ignore",
+      });
 
       proc.on("error", () => resolve(false));
       proc.on("close", (code) => resolve(code === 0));
@@ -369,20 +375,13 @@ export class PodmanRunner {
     });
   }
 
-  async verifyContainerRunning(
-    containerName: string,
-    retries = 3
-  ): Promise<boolean> {
+  async verifyContainerRunning(containerName: string, retries = 3): Promise<boolean> {
     for (let i = 0; i < retries; i++) {
       await new Promise((r) => setTimeout(r, 500));
       const exists = await new Promise<boolean>((resolve) => {
-        const proc = spawn(
-          this.config.runtime,
-          ["container", "exists", containerName],
-          {
-            stdio: "ignore",
-          }
-        );
+        const proc = spawn(this.config.runtime, ["container", "exists", containerName], {
+          stdio: "ignore",
+        });
         proc.on("close", (code) => resolve(code === 0));
         proc.on("error", () => resolve(false));
       });
@@ -419,22 +418,28 @@ export class PodmanRunner {
         }
 
         try {
-          const stats = JSON.parse(stdout);
+          const stats: unknown = JSON.parse(stdout);
           // Podman stats JSON format - may be array or single object
-          const stat = Array.isArray(stats) ? stats[0] : stats;
-          if (!stat) {
+          const statArray = Array.isArray(stats) ? stats : [stats];
+          const stat: unknown = statArray[0];
+
+          if (!isPodmanStatsOutput(stat)) {
             resolve(undefined);
             return;
           }
 
-          const memUsage = this.parseMemoryString(stat.MemUsage || stat.mem_usage);
-          const memLimit = this.parseMemoryString(stat.MemLimit || stat.mem_limit);
+          const memUsage = this.parseMemoryString(stat.MemUsage ?? stat.mem_usage);
+          const memLimit = this.parseMemoryString(stat.MemLimit ?? stat.mem_limit);
 
           resolve({
             memoryUsageMB: memUsage,
             memoryLimitMB: memLimit,
-            memoryPercent: stat.MemPerc ? parseFloat(String(stat.MemPerc).replace("%", "")) : undefined,
-            cpuPercent: stat.CPUPerc ? parseFloat(String(stat.CPUPerc).replace("%", "")) : undefined,
+            memoryPercent: stat.MemPerc
+              ? parseFloat(String(stat.MemPerc).replace("%", ""))
+              : undefined,
+            cpuPercent: stat.CPUPerc
+              ? parseFloat(String(stat.CPUPerc).replace("%", ""))
+              : undefined,
           });
         } catch {
           resolve(undefined);
@@ -456,10 +461,10 @@ export class PodmanRunner {
     if (!memStr) return undefined;
 
     // Handle "used / limit" format (e.g., "256MiB / 512MiB")
-    const parts = String(memStr).split("/");
+    const parts = memStr.split("/");
     const valueStr = parts[0].trim();
 
-    const match = valueStr.match(/^([\d.]+)\s*(B|KB|KiB|MB|MiB|GB|GiB)/i);
+    const match = /^([\d.]+)\s*(B|KB|KiB|MB|MiB|GB|GiB)/i.exec(valueStr);
     if (!match) return undefined;
 
     const value = parseFloat(match[1]);

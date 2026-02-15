@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach, afterAll } from "vitest";
-import { SessionManager, SessionState } from "./session-manager";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { SessionManager } from "./session-manager";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { tmpdir } from "node:os";
@@ -15,7 +15,10 @@ describe("SessionManager (integration)", () => {
 
   beforeEach(async () => {
     // Create unique temp directory for each test
-    testDir = path.join(tmpdir(), `session-manager-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    testDir = path.join(
+      tmpdir(),
+      `session-manager-test-${String(Date.now())}-${Math.random().toString(36).slice(2)}`
+    );
     await fs.mkdir(testDir, { recursive: true });
 
     manager = new SessionManager({
@@ -237,7 +240,7 @@ describe("SessionManager (integration)", () => {
       });
 
       const workspace = homeManager.workspaceDir("test");
-      expect(workspace).toContain(process.env.HOME || "/home");
+      expect(workspace).toContain(process.env.HOME ?? "/home");
       expect(workspace).not.toContain("~");
     });
   });

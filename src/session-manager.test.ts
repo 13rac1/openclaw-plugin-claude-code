@@ -1,8 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { SessionManager, SessionState, SessionManagerConfig } from "./session-manager";
+import type { SessionState, SessionManagerConfig } from "./session-manager";
+import { SessionManager } from "./session-manager";
 import * as fs from "node:fs/promises";
-import * as os from "node:os";
-import * as path from "node:path";
 
 vi.mock("node:fs/promises");
 vi.mock("node:os", () => ({
@@ -374,9 +373,7 @@ describe("SessionManager", () => {
     });
 
     it("returns empty array when no sessions are idle", async () => {
-      mockFs.readdir.mockResolvedValue([
-        { name: "active", isDirectory: () => true },
-      ] as any);
+      mockFs.readdir.mockResolvedValue([{ name: "active", isDirectory: () => true }] as any);
 
       const activeSession: SessionState = {
         sessionKey: "active",

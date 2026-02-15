@@ -14,7 +14,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { homedir } from "node:os";
 
-async function main() {
+async function main(): Promise<void> {
   console.log("=== Claude Code Plugin Test Harness ===\n");
 
   // Configuration matching plugin defaults
@@ -48,7 +48,9 @@ async function main() {
   const imageExists = await podmanRunner.checkImage();
   if (!imageExists) {
     console.error(`ERROR: Image ${config.image} not found`);
-    console.error("Build it with: podman build -t openclaw-claude-code:latest -f roles/podman/templates/Dockerfile.claude-code.j2 .");
+    console.error(
+      "Build it with: podman build -t openclaw-claude-code:latest -f roles/podman/templates/Dockerfile.claude-code.j2 ."
+    );
     process.exit(1);
   }
   console.log("✓ Image exists\n");
@@ -124,11 +126,14 @@ async function main() {
     console.log(result.content);
     console.log("---");
     console.log("\n✓ SUCCESS");
-  } catch (err: any) {
+  } catch (err: unknown) {
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
     console.log("=== Error ===");
-    console.log("Message:", err.message);
-    console.log("Error type:", err.errorType || "unknown");
+    const message = err instanceof Error ? err.message : String(err);
+    const errorType =
+      err instanceof Error && "errorType" in err ? String(err.errorType) : "unknown";
+    console.log("Message:", message);
+    console.log("Error type:", errorType);
     console.log("Elapsed:", elapsed, "s");
     console.log("\n✗ FAILED");
     process.exit(1);
@@ -140,7 +145,7 @@ async function main() {
   }
 }
 
-main().catch((err) => {
+main().catch((err: unknown) => {
   console.error("Unhandled error:", err);
   process.exit(1);
 });

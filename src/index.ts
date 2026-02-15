@@ -41,6 +41,12 @@ const DEFAULT_CONFIG: ClaudeCodePluginConfig = {
   maxOutputSize: 10 * 1024 * 1024, // 10MB default
 };
 
+/** Tool response content item */
+interface ContentItem {
+  type: string;
+  text: string;
+}
+
 /**
  * OpenClaw Plugin API interface
  */
@@ -50,7 +56,7 @@ interface PluginApi {
     name: string;
     description: string;
     parameters: unknown;
-    execute: (id: string, params: Record<string, unknown>) => Promise<{ content: Array<{ type: string; text: string }> }>;
+    execute: (id: string, params: Record<string, unknown>) => Promise<{ content: ContentItem[] }>;
   }): void;
 }
 
@@ -64,15 +70,15 @@ export function formatDuration(ms: number): string {
   const days = Math.floor(hours / 24);
 
   if (days > 0) {
-    return `${days}d ${hours % 24}h`;
+    return `${String(days)}d ${String(hours % 24)}h`;
   }
   if (hours > 0) {
-    return `${hours}h ${minutes % 60}m`;
+    return `${String(hours)}h ${String(minutes % 60)}m`;
   }
   if (minutes > 0) {
-    return `${minutes}m ${seconds % 60}s`;
+    return `${String(minutes)}m ${String(seconds % 60)}s`;
   }
-  return `${seconds}s`;
+  return `${String(seconds)}s`;
 }
 
 /**
@@ -125,7 +131,7 @@ export default function register(api: PluginApi): void {
         throw new Error("prompt parameter is required");
       }
 
-      const sessionKey = (params.session_id as string) || `session-${id}`;
+      const sessionKey = (params.session_id as string | undefined) ?? `session-${id}`;
 
       // Check for authentication (credentials file preferred over API key)
       // This allows using OAuth/Claude Max even when ANTHROPIC_API_KEY is set
@@ -162,7 +168,7 @@ export default function register(api: PluginApi): void {
       const session = await sessionManager.getOrCreateSession(sessionKey);
 
       // Get paths for volume mounts
-      const claudeDir = `${config.sessionsDir.replace("~", process.env.HOME || "")}/${sessionKey}/.claude`;
+      const claudeDir = `${config.sessionsDir.replace("~", process.env.HOME ?? "")}/${sessionKey}/.claude`;
       const workspaceDir = sessionManager.workspaceDir(sessionKey);
 
       // Copy credentials file to session's .claude directory if it exists
@@ -171,8 +177,9 @@ export default function register(api: PluginApi): void {
         try {
           await fs.mkdir(claudeDir, { recursive: true });
           await fs.copyFile(hostCredsPath, sessionCredsPath);
-        } catch (err) {
-          throw new Error(`Failed to copy credentials file: ${err}`);
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : String(err);
+          throw new Error(`Failed to copy credentials file: ${message}`);
         }
       }
 
@@ -213,14 +220,19 @@ export default function register(api: PluginApi): void {
 
       // Add truncation warning if output was truncated
       let truncationWarning = "";
-      if (result.outputTruncated) {
-        const originalMB = (result.originalSize! / (1024 * 1024)).toFixed(2);
+      if (result.outputTruncated && result.originalSize !== undefined) {
+        const originalMB = (result.originalSize / (1024 * 1024)).toFixed(2);
         const limitMB = (config.maxOutputSize / (1024 * 1024)).toFixed(2);
         truncationWarning = `\n[WARNING: Output truncated from ${originalMB}MB to ${limitMB}MB limit]`;
       }
 
       return {
-        content: [{ type: "text", text: `${authInfo}${metricsInfo}${truncationWarning}\n\n${result.content}` }],
+        content: [
+          {
+            type: "text",
+            text: `${authInfo}${metricsInfo}${truncationWarning}\n\n${result.content}`,
+          },
+        ],
       };
     },
   });
@@ -238,7 +250,7 @@ export default function register(api: PluginApi): void {
       const text =
         deleted.length === 0
           ? "No idle sessions to clean up."
-          : `Cleaned up ${deleted.length} idle session(s): ${deleted.join(", ")}`;
+          : `Cleaned up ${String(deleted.length)} idle session(s): ${deleted.join(", ")}`;
 
       return {
         content: [{ type: "text", text }],
@@ -273,14 +285,14 @@ export default function register(api: PluginApi): void {
           `Session: ${session.sessionKey}`,
           `  Age: ${ageFormatted}`,
           `  Last Active: ${lastActiveFormatted} ago`,
-          `  Messages: ${session.messageCount}`,
+          `  Messages: ${String(session.messageCount)}`,
           session.claudeSessionId ? `  Claude Session: ${session.claudeSessionId}` : "",
         ]
           .filter(Boolean)
           .join("\n");
       });
 
-      const text = `Found ${sessions.length} session(s):\n\n${lines.join("\n\n")}`;
+      const text = `Found ${String(sessions.length)} session(s):\n\n${lines.join("\n\n")}`;
 
       return {
         content: [{ type: "text", text }],

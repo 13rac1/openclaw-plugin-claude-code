@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { PodmanRunner, PodmanConfig } from "./podman-runner";
+import type { PodmanConfig } from "./podman-runner";
+import { PodmanRunner } from "./podman-runner";
 import { execSync } from "node:child_process";
 
 /**
@@ -129,7 +130,7 @@ describe.skipIf(!podmanAvailable)("PodmanRunner container execution (integration
       });
 
       proc.on("error", reject);
-      proc.on("close", (code: number) => {
+      proc.on("close", () => {
         // Memory limit should be approximately 64MB (67108864 bytes)
         const limit = parseInt(stdout.trim(), 10);
         resolve(limit);

@@ -93,10 +93,7 @@ export class SessionManager {
     return this.createSession(sessionKey);
   }
 
-  async updateSession(
-    sessionKey: string,
-    claudeSessionId: string | null
-  ): Promise<SessionState> {
+  async updateSession(sessionKey: string, claudeSessionId: string | null): Promise<SessionState> {
     const session = await this.getSession(sessionKey);
     if (!session) {
       throw new Error(`Session not found: ${sessionKey}`);
