@@ -99,6 +99,7 @@ Add to your `openclaw.json`:
 | `workspacesDir` | string | `~/.openclaw/workspaces` | Directory for session workspaces |
 | `sessionIdleTimeout` | number | `3600` | Cleanup idle sessions after this many seconds |
 | `apparmorProfile` | string | `""` | AppArmor profile name (empty = disabled) |
+| `maxOutputSize` | number | `10485760` | Maximum output size in bytes (10MB default, 0 = unlimited) |
 
 ## Authentication
 
@@ -128,22 +129,19 @@ export ANTHROPIC_API_KEY=sk-ant-...
 
 ### `claude_code`
 
-Execute a prompt using Claude Code CLI in an isolated container.
+Execute a prompt using Claude Code CLI in an isolated container. Returns the response along with resource metrics (memory/CPU usage) and truncation warnings if output exceeds `maxOutputSize`.
 
 **Parameters:**
 - `prompt` (required): The task or prompt to send to Claude Code
 - `session_id` (optional): Session ID to continue a previous session
 
-**Example:**
-```
-Use claude_code to refactor the authentication module to use JWT tokens
-```
-
 ### `claude_code_cleanup`
 
 Clean up idle Claude Code sessions.
 
-**Parameters:** None
+### `claude_code_sessions`
+
+List all active sessions with age, last activity, and message count.
 
 ## Security
 
