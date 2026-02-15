@@ -1,6 +1,6 @@
 {
   "name": "@13rac1/openclaw-plugin-claude-code",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "OpenClaw plugin for running Claude Code CLI in isolated Podman containers",
   "type": "module",
   "license": "Apache-2.0",
@@ -51,10 +51,8 @@
   "peerDependencies": {
     "openclaw": ">=2025.1.0"
   },
-  "dependencies": {
-    "@sinclair/typebox": "^0.34.48"
-  },
   "devDependencies": {
+    "@sinclair/typebox": "^0.34.48",
     "@eslint/js": "^9.39.2",
     "@types/node": "^22.0.0",
     "@vitest/coverage-v8": "^3.2.4",
