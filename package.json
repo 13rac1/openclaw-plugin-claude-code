@@ -34,7 +34,6 @@
     "openclaw.plugin.json"
   ],
   "scripts": {
-    "prepare": "npm run build",
     "build": "tsc",
     "clean": "rm -rf dist coverage",
     "lint": "eslint src/",

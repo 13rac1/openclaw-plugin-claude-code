@@ -32,10 +32,16 @@ An [OpenClaw](https://openclaw.ai) plugin that runs Claude Code CLI sessions in 
 openclaw plugins install @13rac1/openclaw-plugin-claude-code
 ```
 
-### From GitHub
+### From GitHub Release
+
+Download the release zip from [GitHub Releases](https://github.com/13rac1/openclaw-plugin-claude-code/releases) and extract to your plugins directory:
 
 ```bash
-openclaw plugins install https://github.com/13rac1/openclaw-plugin-claude-code
+# Download latest release
+curl -LO https://github.com/13rac1/openclaw-plugin-claude-code/releases/latest/download/openclaw-plugin-claude-code-1.0.0.zip
+
+# Extract to plugins directory
+unzip openclaw-plugin-claude-code-1.0.0.zip -d ~/.openclaw/plugins/openclaw-plugin-claude-code
 ```
 
 ### Container Image

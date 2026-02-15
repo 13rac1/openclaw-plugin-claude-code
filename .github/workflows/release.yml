@@ -5,6 +5,42 @@ on:
     tags: ['v*']
 
 jobs:
+  build-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Run tests
+        run: npm test
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Create release zip
+        run: |
+          zip -r openclaw-plugin-claude-code-${{ steps.version.outputs.VERSION }}.zip \
+            dist/ package.json openclaw.plugin.json LICENSE README.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: openclaw-plugin-claude-code-${{ steps.version.outputs.VERSION }}.zip
+          generate_release_notes: true
+
   publish-npm:
     runs-on: ubuntu-latest
     permissions:
