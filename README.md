@@ -1,5 +1,12 @@
 # OpenClaw Plugin: Claude Code
 
+[![CI](https://github.com/13rac1/openclaw-plugin-claude-code/actions/workflows/ci.yml/badge.svg)](https://github.com/13rac1/openclaw-plugin-claude-code/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/13rac1/openclaw-plugin-claude-code/graph/badge.svg)](https://codecov.io/gh/13rac1/openclaw-plugin-claude-code)
+[![npm version](https://img.shields.io/npm/v/@13rac1/openclaw-plugin-claude-code.svg)](https://www.npmjs.com/package/@13rac1/openclaw-plugin-claude-code)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D22-brightgreen.svg)](https://nodejs.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue.svg)](https://www.typescriptlang.org/)
+
 An [OpenClaw](https://openclaw.ai) plugin that runs Claude Code CLI sessions in isolated Podman (or Docker) containers. This enables OpenClaw agents to delegate complex coding tasks to Claude Code while maintaining security through containerization.
 
 ## Features
