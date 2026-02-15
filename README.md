@@ -127,21 +127,53 @@ export ANTHROPIC_API_KEY=sk-ant-...
 
 ## Registered Tools
 
-### `claude_code`
+### `claude_code_start`
 
-Execute a prompt using Claude Code CLI in an isolated container. Returns the response along with resource metrics (memory/CPU usage) and truncation warnings if output exceeds `maxOutputSize`.
+Start a Claude Code task in the background. Returns immediately with a job ID.
 
 **Parameters:**
 - `prompt` (required): The task or prompt to send to Claude Code
 - `session_id` (optional): Session ID to continue a previous session
 
+**Returns:** `{ jobId: string, sessionId: string }`
+
+### `claude_code_status`
+
+Check the status of a running or completed job.
+
+**Parameters:**
+- `job_id` (required): Job ID returned from `claude_code_start`
+- `session_id` (optional): Session ID
+
+**Returns:** Status, elapsed time, output size, resource metrics, exit code, errors
+
+### `claude_code_output`
+
+Read or tail output from a job.
+
+**Parameters:**
+- `job_id` (required): Job ID
+- `session_id` (optional): Session ID
+- `offset` (optional): Byte offset to start reading from (for tailing)
+- `limit` (optional): Maximum bytes to read (default 64KB)
+
+**Returns:** Output content with `hasMore` flag for pagination
+
+### `claude_code_cancel`
+
+Cancel a running job and stop its container.
+
+**Parameters:**
+- `job_id` (required): Job ID
+- `session_id` (optional): Session ID
+
 ### `claude_code_cleanup`
 
-Clean up idle Claude Code sessions.
+Clean up idle sessions and their jobs.
 
 ### `claude_code_sessions`
 
-List all active sessions with age, last activity, and message count.
+List all active sessions with age, last activity, message count, and active job info.
 
 ## Security
 
@@ -287,6 +319,12 @@ Claude Code stopped producing output. This may indicate:
 - Task completed but output wasn't captured
 - Claude Code is stuck
 - Task requires more time (increase `idleTimeout`)
+
+## FAQ
+
+### Why Podman?
+
+The primary reason is rootless. Podman runs containers without root privileges by default, which is essential for a tool that executes arbitrary code from AI agents. Docker can run rootless too, but it requires additional setup and isn't the default mode.
 
 ## License
 

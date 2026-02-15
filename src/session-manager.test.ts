@@ -121,6 +121,7 @@ describe("SessionManager", () => {
         createdAt: "2024-01-15T10:00:00.000Z",
         lastActivity: "2024-01-15T10:00:00.000Z",
         messageCount: 0,
+        activeJobId: null,
       });
 
       expect(mockFs.writeFile).toHaveBeenCalledWith(
@@ -389,6 +390,530 @@ describe("SessionManager", () => {
 
       expect(deleted).toEqual([]);
       expect(mockFs.rm).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("createJob", () => {
+    it("creates job directory and files", async () => {
+      mockFs.mkdir.mockResolvedValue(undefined);
+      mockFs.writeFile.mockResolvedValue(undefined);
+
+      const job = await manager.createJob("test-session", {
+        prompt: "test prompt",
+        containerName: "claude-test-session",
+      });
+
+      expect(job.jobId).toBeDefined();
+      expect(job.sessionKey).toBe("test-session");
+      expect(job.containerName).toBe("claude-test-session");
+      expect(job.status).toBe("pending");
+      expect(job.prompt).toBe("test prompt");
+      expect(job.createdAt).toBe("2024-01-15T10:00:00.000Z");
+
+      expect(mockFs.mkdir).toHaveBeenCalledWith("/var/openclaw/sessions/test-session/jobs", {
+        recursive: true,
+      });
+    });
+  });
+
+  describe("getJob", () => {
+    it("returns job when file exists", async () => {
+      const jobData = {
+        jobId: "job-123",
+        sessionKey: "test",
+        containerName: "claude-test",
+        status: "running",
+        prompt: "test",
+        createdAt: "2024-01-15T10:00:00.000Z",
+        startedAt: "2024-01-15T10:00:01.000Z",
+        completedAt: null,
+        exitCode: null,
+        errorType: null,
+        errorMessage: null,
+        outputFile: "/path/to/output.log",
+        outputSize: 100,
+        outputTruncated: false,
+        metrics: null,
+      };
+
+      mockFs.readFile.mockResolvedValue(JSON.stringify(jobData));
+
+      const result = await manager.getJob("test", "job-123");
+
+      expect(result).toEqual(jobData);
+      expect(mockFs.readFile).toHaveBeenCalledWith(
+        "/var/openclaw/sessions/test/jobs/job-123.json",
+        "utf-8"
+      );
+    });
+
+    it("returns null when job not found", async () => {
+      const error = new Error("ENOENT") as NodeJS.ErrnoException;
+      error.code = "ENOENT";
+      mockFs.readFile.mockRejectedValue(error);
+
+      const result = await manager.getJob("test", "nonexistent");
+
+      expect(result).toBeNull();
+    });
+
+    it("throws on other errors", async () => {
+      const error = new Error("Permission denied") as NodeJS.ErrnoException;
+      error.code = "EACCES";
+      mockFs.readFile.mockRejectedValue(error);
+
+      await expect(manager.getJob("test", "job-123")).rejects.toThrow("Permission denied");
+    });
+  });
+
+  describe("updateJob", () => {
+    it("updates job with partial fields", async () => {
+      const existingJob = {
+        jobId: "job-123",
+        sessionKey: "test",
+        containerName: "claude-test",
+        status: "pending",
+        prompt: "test",
+        createdAt: "2024-01-15T10:00:00.000Z",
+        startedAt: null,
+        completedAt: null,
+        exitCode: null,
+        errorType: null,
+        errorMessage: null,
+        outputFile: "/path/to/output.log",
+        outputSize: 0,
+        outputTruncated: false,
+        metrics: null,
+      };
+
+      mockFs.readFile.mockResolvedValue(JSON.stringify(existingJob));
+      mockFs.writeFile.mockResolvedValue(undefined);
+
+      const result = await manager.updateJob("test", "job-123", {
+        status: "running",
+        startedAt: "2024-01-15T10:00:05.000Z",
+      });
+
+      expect(result.status).toBe("running");
+      expect(result.startedAt).toBe("2024-01-15T10:00:05.000Z");
+      expect(result.prompt).toBe("test"); // Unchanged
+    });
+
+    it("throws when job not found", async () => {
+      const error = new Error("ENOENT") as NodeJS.ErrnoException;
+      error.code = "ENOENT";
+      mockFs.readFile.mockRejectedValue(error);
+
+      await expect(manager.updateJob("test", "nonexistent", { status: "running" })).rejects.toThrow(
+        "Job not found: nonexistent"
+      );
+    });
+  });
+
+  describe("getActiveJob", () => {
+    it("returns active job when session has one", async () => {
+      const session: SessionState = {
+        sessionKey: "test",
+        claudeSessionId: null,
+        createdAt: "2024-01-15T10:00:00.000Z",
+        lastActivity: "2024-01-15T10:00:00.000Z",
+        messageCount: 0,
+        activeJobId: "job-123",
+      };
+
+      const job = {
+        jobId: "job-123",
+        sessionKey: "test",
+        containerName: "claude-test",
+        status: "running",
+        prompt: "test",
+        createdAt: "2024-01-15T10:00:00.000Z",
+        startedAt: "2024-01-15T10:00:01.000Z",
+        completedAt: null,
+        exitCode: null,
+        errorType: null,
+        errorMessage: null,
+        outputFile: "/path/to/output.log",
+        outputSize: 100,
+        outputTruncated: false,
+        metrics: null,
+      };
+
+      mockFs.readFile
+        .mockResolvedValueOnce(JSON.stringify(session))
+        .mockResolvedValueOnce(JSON.stringify(job));
+
+      const result = await manager.getActiveJob("test");
+
+      expect(result).toEqual(job);
+    });
+
+    it("returns null when no active job", async () => {
+      const session: SessionState = {
+        sessionKey: "test",
+        claudeSessionId: null,
+        createdAt: "2024-01-15T10:00:00.000Z",
+        lastActivity: "2024-01-15T10:00:00.000Z",
+        messageCount: 0,
+        activeJobId: null,
+      };
+
+      mockFs.readFile.mockResolvedValue(JSON.stringify(session));
+
+      const result = await manager.getActiveJob("test");
+
+      expect(result).toBeNull();
+    });
+
+    it("returns null when session not found", async () => {
+      const error = new Error("ENOENT") as NodeJS.ErrnoException;
+      error.code = "ENOENT";
+      mockFs.readFile.mockRejectedValue(error);
+
+      const result = await manager.getActiveJob("nonexistent");
+
+      expect(result).toBeNull();
+    });
+  });
+
+  describe("setActiveJob", () => {
+    it("sets active job ID on session", async () => {
+      const session: SessionState = {
+        sessionKey: "test",
+        claudeSessionId: null,
+        createdAt: "2024-01-15T10:00:00.000Z",
+        lastActivity: "2024-01-15T09:00:00.000Z",
+        messageCount: 0,
+        activeJobId: null,
+      };
+
+      mockFs.readFile.mockResolvedValue(JSON.stringify(session));
+      mockFs.writeFile.mockResolvedValue(undefined);
+
+      await manager.setActiveJob("test", "job-456");
+
+      expect(mockFs.writeFile).toHaveBeenCalledWith(
+        "/var/openclaw/sessions/test/session.json",
+        expect.stringContaining('"activeJobId": "job-456"')
+      );
+    });
+
+    it("clears active job when null", async () => {
+      const session: SessionState = {
+        sessionKey: "test",
+        claudeSessionId: null,
+        createdAt: "2024-01-15T10:00:00.000Z",
+        lastActivity: "2024-01-15T09:00:00.000Z",
+        messageCount: 0,
+        activeJobId: "old-job",
+      };
+
+      mockFs.readFile.mockResolvedValue(JSON.stringify(session));
+      mockFs.writeFile.mockResolvedValue(undefined);
+
+      await manager.setActiveJob("test", null);
+
+      expect(mockFs.writeFile).toHaveBeenCalledWith(
+        "/var/openclaw/sessions/test/session.json",
+        expect.stringContaining('"activeJobId": null')
+      );
+    });
+
+    it("throws when session not found", async () => {
+      const error = new Error("ENOENT") as NodeJS.ErrnoException;
+      error.code = "ENOENT";
+      mockFs.readFile.mockRejectedValue(error);
+
+      await expect(manager.setActiveJob("nonexistent", "job-123")).rejects.toThrow(
+        "Session not found: nonexistent"
+      );
+    });
+  });
+
+  describe("listJobs", () => {
+    it("returns all jobs for session", async () => {
+      mockFs.readdir.mockResolvedValue(["job-1.json", "job-2.json", "job-3.log"] as any);
+
+      const job1 = {
+        jobId: "job-1",
+        sessionKey: "test",
+        containerName: "claude-test",
+        status: "completed",
+        prompt: "test 1",
+        createdAt: "2024-01-15T10:00:00.000Z",
+        startedAt: null,
+        completedAt: null,
+        exitCode: 0,
+        errorType: null,
+        errorMessage: null,
+        outputFile: "/path/job-1.log",
+        outputSize: 100,
+        outputTruncated: false,
+        metrics: null,
+      };
+
+      const job2 = {
+        jobId: "job-2",
+        sessionKey: "test",
+        containerName: "claude-test",
+        status: "running",
+        prompt: "test 2",
+        createdAt: "2024-01-15T10:01:00.000Z",
+        startedAt: null,
+        completedAt: null,
+        exitCode: null,
+        errorType: null,
+        errorMessage: null,
+        outputFile: "/path/job-2.log",
+        outputSize: 50,
+        outputTruncated: false,
+        metrics: null,
+      };
+
+      mockFs.readFile
+        .mockResolvedValueOnce(JSON.stringify(job1))
+        .mockResolvedValueOnce(JSON.stringify(job2));
+
+      const result = await manager.listJobs("test");
+
+      expect(result).toHaveLength(2);
+      expect(result).toContainEqual(job1);
+      expect(result).toContainEqual(job2);
+    });
+
+    it("returns empty array when jobs dir does not exist", async () => {
+      const error = new Error("ENOENT") as NodeJS.ErrnoException;
+      error.code = "ENOENT";
+      mockFs.readdir.mockRejectedValue(error);
+
+      const result = await manager.listJobs("test");
+
+      expect(result).toEqual([]);
+    });
+
+    it("skips jobs that fail to read", async () => {
+      mockFs.readdir.mockResolvedValue(["job-1.json", "job-2.json"] as any);
+
+      const job1 = {
+        jobId: "job-1",
+        sessionKey: "test",
+        containerName: "claude-test",
+        status: "completed",
+        prompt: "test 1",
+        createdAt: "2024-01-15T10:00:00.000Z",
+        startedAt: null,
+        completedAt: null,
+        exitCode: 0,
+        errorType: null,
+        errorMessage: null,
+        outputFile: "/path/job-1.log",
+        outputSize: 100,
+        outputTruncated: false,
+        metrics: null,
+      };
+
+      const error = new Error("ENOENT") as NodeJS.ErrnoException;
+      error.code = "ENOENT";
+
+      mockFs.readFile.mockResolvedValueOnce(JSON.stringify(job1)).mockRejectedValueOnce(error);
+
+      const result = await manager.listJobs("test");
+
+      expect(result).toHaveLength(1);
+      expect(result[0]).toEqual(job1);
+    });
+  });
+
+  describe("readJobOutput", () => {
+    it("reads output with default options", async () => {
+      const job = {
+        jobId: "job-123",
+        sessionKey: "test",
+        containerName: "claude-test",
+        status: "running",
+        prompt: "test",
+        createdAt: "2024-01-15T10:00:00.000Z",
+        startedAt: null,
+        completedAt: null,
+        exitCode: null,
+        errorType: null,
+        errorMessage: null,
+        outputFile: "/var/openclaw/sessions/test/jobs/job-123.log",
+        outputSize: 100,
+        outputTruncated: false,
+        metrics: null,
+      };
+
+      const mockHandle = {
+        read: vi.fn().mockResolvedValue({ bytesRead: 26 }),
+        close: vi.fn().mockResolvedValue(undefined),
+      };
+
+      mockFs.readFile.mockResolvedValue(JSON.stringify(job));
+      mockFs.stat.mockResolvedValue({ size: 26 } as any);
+      mockFs.open.mockResolvedValue(mockHandle as any);
+
+      const result = await manager.readJobOutput("test", "job-123");
+
+      expect(result.size).toBe(26);
+      expect(result.totalSize).toBe(26);
+      expect(result.hasMore).toBe(false);
+      expect(mockHandle.close).toHaveBeenCalled();
+    });
+
+    it("supports offset and limit", async () => {
+      const job = {
+        jobId: "job-123",
+        sessionKey: "test",
+        containerName: "claude-test",
+        status: "running",
+        prompt: "test",
+        createdAt: "2024-01-15T10:00:00.000Z",
+        startedAt: null,
+        completedAt: null,
+        exitCode: null,
+        errorType: null,
+        errorMessage: null,
+        outputFile: "/var/openclaw/sessions/test/jobs/job-123.log",
+        outputSize: 100,
+        outputTruncated: false,
+        metrics: null,
+      };
+
+      const mockHandle = {
+        read: vi.fn().mockResolvedValue({ bytesRead: 10 }),
+        close: vi.fn().mockResolvedValue(undefined),
+      };
+
+      mockFs.readFile.mockResolvedValue(JSON.stringify(job));
+      mockFs.stat.mockResolvedValue({ size: 100 } as any);
+      mockFs.open.mockResolvedValue(mockHandle as any);
+
+      const result = await manager.readJobOutput("test", "job-123", {
+        offset: 50,
+        limit: 10,
+      });
+
+      expect(result.size).toBe(10);
+      expect(result.totalSize).toBe(100);
+      expect(result.hasMore).toBe(true);
+      expect(mockHandle.read).toHaveBeenCalledWith(expect.any(Buffer), 0, 10, 50);
+    });
+
+    it("returns empty result when offset exceeds file size", async () => {
+      const job = {
+        jobId: "job-123",
+        sessionKey: "test",
+        containerName: "claude-test",
+        status: "running",
+        prompt: "test",
+        createdAt: "2024-01-15T10:00:00.000Z",
+        startedAt: null,
+        completedAt: null,
+        exitCode: null,
+        errorType: null,
+        errorMessage: null,
+        outputFile: "/var/openclaw/sessions/test/jobs/job-123.log",
+        outputSize: 100,
+        outputTruncated: false,
+        metrics: null,
+      };
+
+      mockFs.readFile.mockResolvedValue(JSON.stringify(job));
+      mockFs.stat.mockResolvedValue({ size: 50 } as any);
+
+      const result = await manager.readJobOutput("test", "job-123", { offset: 100 });
+
+      expect(result.content).toBe("");
+      expect(result.size).toBe(0);
+      expect(result.hasMore).toBe(false);
+    });
+
+    it("throws when job not found", async () => {
+      const error = new Error("ENOENT") as NodeJS.ErrnoException;
+      error.code = "ENOENT";
+      mockFs.readFile.mockRejectedValue(error);
+
+      await expect(manager.readJobOutput("test", "nonexistent")).rejects.toThrow(
+        "Job not found: nonexistent"
+      );
+    });
+
+    it("returns empty result when output file does not exist", async () => {
+      const job = {
+        jobId: "job-123",
+        sessionKey: "test",
+        containerName: "claude-test",
+        status: "pending",
+        prompt: "test",
+        createdAt: "2024-01-15T10:00:00.000Z",
+        startedAt: null,
+        completedAt: null,
+        exitCode: null,
+        errorType: null,
+        errorMessage: null,
+        outputFile: "/var/openclaw/sessions/test/jobs/job-123.log",
+        outputSize: 0,
+        outputTruncated: false,
+        metrics: null,
+      };
+
+      const error = new Error("ENOENT") as NodeJS.ErrnoException;
+      error.code = "ENOENT";
+
+      mockFs.readFile.mockResolvedValue(JSON.stringify(job));
+      mockFs.stat.mockRejectedValue(error);
+
+      const result = await manager.readJobOutput("test", "job-123");
+
+      expect(result.content).toBe("");
+      expect(result.size).toBe(0);
+      expect(result.totalSize).toBe(0);
+      expect(result.hasMore).toBe(false);
+    });
+  });
+
+  describe("appendJobOutput", () => {
+    it("appends content and updates job size", async () => {
+      const job = {
+        jobId: "job-123",
+        sessionKey: "test",
+        containerName: "claude-test",
+        status: "running",
+        prompt: "test",
+        createdAt: "2024-01-15T10:00:00.000Z",
+        startedAt: null,
+        completedAt: null,
+        exitCode: null,
+        errorType: null,
+        errorMessage: null,
+        outputFile: "/var/openclaw/sessions/test/jobs/job-123.log",
+        outputSize: 100,
+        outputTruncated: false,
+        metrics: null,
+      };
+
+      mockFs.readFile.mockResolvedValue(JSON.stringify(job));
+      mockFs.appendFile.mockResolvedValue(undefined);
+      mockFs.stat.mockResolvedValue({ size: 150 } as any);
+      mockFs.writeFile.mockResolvedValue(undefined);
+
+      await manager.appendJobOutput("test", "job-123", "new content");
+
+      expect(mockFs.appendFile).toHaveBeenCalledWith(
+        "/var/openclaw/sessions/test/jobs/job-123.log",
+        "new content"
+      );
+    });
+
+    it("throws when job not found", async () => {
+      const error = new Error("ENOENT") as NodeJS.ErrnoException;
+      error.code = "ENOENT";
+      mockFs.readFile.mockRejectedValue(error);
+
+      await expect(manager.appendJobOutput("test", "nonexistent", "content")).rejects.toThrow(
+        "Job not found: nonexistent"
+      );
     });
   });
 });
