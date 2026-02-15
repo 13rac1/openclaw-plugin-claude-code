@@ -1,8 +1,8 @@
 {
   "id": "claude-code",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "Run Claude Code sessions in isolated Podman containers",
-  "main": "dist/index.js",
+  "main": "dist/claude-code.js",
   "tools": ["claude_code", "claude_code_cleanup", "claude_code_sessions"],
   "configSchema": {
     "type": "object",

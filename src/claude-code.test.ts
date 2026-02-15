@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
-import { formatDuration } from "./index.js";
-import register from "./index.js";
+import { formatDuration } from "./claude-code.js";
+import register from "./claude-code.js";
 import * as sessionManagerModule from "./session-manager.js";
 import * as podmanRunnerModule from "./podman-runner.js";
 import * as fs from "node:fs/promises";

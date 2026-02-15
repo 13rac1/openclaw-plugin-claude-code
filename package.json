@@ -1,6 +1,6 @@
 {
   "name": "@13rac1/openclaw-plugin-claude-code",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "OpenClaw plugin for running Claude Code CLI in isolated Podman containers",
   "type": "module",
   "license": "Apache-2.0",
@@ -21,12 +21,12 @@
     "podman",
     "container"
   ],
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "dist/claude-code.js",
+  "types": "dist/claude-code.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "types": "./dist/claude-code.d.ts",
+      "import": "./dist/claude-code.js"
     }
   },
   "files": [
@@ -70,7 +70,7 @@
   },
   "openclaw": {
     "extensions": [
-      "./dist/index.js"
+      "./dist/claude-code.js"
     ]
   }
 }
