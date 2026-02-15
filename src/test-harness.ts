@@ -26,6 +26,7 @@ async function main() {
     memory: "512m",
     cpus: "1.0",
     network: "bridge",
+    maxOutputSize: 10 * 1024 * 1024, // 10MB
   };
 
   const sessionConfig = {

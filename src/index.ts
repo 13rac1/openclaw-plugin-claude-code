@@ -20,6 +20,7 @@ export interface ClaudeCodePluginConfig {
   workspacesDir: string;
   sessionIdleTimeout: number; // Seconds before cleaning up inactive sessions
   apparmorProfile?: string; // AppArmor profile name (empty = disabled)
+  maxOutputSize: number; // Maximum output size in bytes (0 = unlimited)
 }
 
 /**
@@ -37,6 +38,7 @@ const DEFAULT_CONFIG: ClaudeCodePluginConfig = {
   workspacesDir: "~/.openclaw/workspaces",
   sessionIdleTimeout: 3600, // Clean up sessions after 1hr idle
   apparmorProfile: "", // Disabled by default
+  maxOutputSize: 10 * 1024 * 1024, // 10MB default
 };
 
 /**
@@ -50,6 +52,27 @@ interface PluginApi {
     parameters: unknown;
     execute: (id: string, params: Record<string, unknown>) => Promise<{ content: Array<{ type: string; text: string }> }>;
   }): void;
+}
+
+/**
+ * Format milliseconds as human-readable duration
+ */
+export function formatDuration(ms: number): string {
+  const seconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
+
+  if (days > 0) {
+    return `${days}d ${hours % 24}h`;
+  }
+  if (hours > 0) {
+    return `${hours}h ${minutes % 60}m`;
+  }
+  if (minutes > 0) {
+    return `${minutes}m ${seconds % 60}s`;
+  }
+  return `${seconds}s`;
 }
 
 /**
@@ -80,6 +103,7 @@ export default function register(api: PluginApi): void {
     cpus: config.cpus,
     network: config.network,
     apparmorProfile: config.apparmorProfile,
+    maxOutputSize: config.maxOutputSize,
   });
 
   // Register the claude-code tool
@@ -167,8 +191,36 @@ export default function register(api: PluginApi): void {
 
       // Include auth method in response for transparency
       const authInfo = `[auth: ${authMethod}]`;
+
+      // Add metrics info if available
+      let metricsInfo = "";
+      if (result.metrics) {
+        const m = result.metrics;
+        const parts: string[] = [];
+        if (m.memoryUsageMB !== undefined) {
+          parts.push(`mem: ${m.memoryUsageMB.toFixed(1)}MB`);
+        }
+        if (m.memoryPercent !== undefined) {
+          parts.push(`${m.memoryPercent.toFixed(1)}%`);
+        }
+        if (m.cpuPercent !== undefined) {
+          parts.push(`cpu: ${m.cpuPercent.toFixed(1)}%`);
+        }
+        if (parts.length > 0) {
+          metricsInfo = ` [${parts.join(", ")}]`;
+        }
+      }
+
+      // Add truncation warning if output was truncated
+      let truncationWarning = "";
+      if (result.outputTruncated) {
+        const originalMB = (result.originalSize! / (1024 * 1024)).toFixed(2);
+        const limitMB = (config.maxOutputSize / (1024 * 1024)).toFixed(2);
+        truncationWarning = `\n[WARNING: Output truncated from ${originalMB}MB to ${limitMB}MB limit]`;
+      }
+
       return {
-        content: [{ type: "text", text: `${authInfo}\n\n${result.content}` }],
+        content: [{ type: "text", text: `${authInfo}${metricsInfo}${truncationWarning}\n\n${result.content}` }],
       };
     },
   });
@@ -187,6 +239,48 @@ export default function register(api: PluginApi): void {
         deleted.length === 0
           ? "No idle sessions to clean up."
           : `Cleaned up ${deleted.length} idle session(s): ${deleted.join(", ")}`;
+
+      return {
+        content: [{ type: "text", text }],
+      };
+    },
+  });
+
+  // Register the sessions listing tool
+  api.registerTool({
+    name: "claude_code_sessions",
+    description:
+      "List all active Claude Code sessions with their age and message count. " +
+      "Useful for understanding which sessions exist before resuming or cleaning up.",
+    parameters: Type.Object({}),
+    async execute() {
+      const sessions = await sessionManager.listSessions();
+
+      if (sessions.length === 0) {
+        return {
+          content: [{ type: "text", text: "No active sessions." }],
+        };
+      }
+
+      const now = Date.now();
+      const lines = sessions.map((session) => {
+        const ageMs = now - new Date(session.createdAt).getTime();
+        const ageFormatted = formatDuration(ageMs);
+        const lastActiveMs = now - new Date(session.lastActivity).getTime();
+        const lastActiveFormatted = formatDuration(lastActiveMs);
+
+        return [
+          `Session: ${session.sessionKey}`,
+          `  Age: ${ageFormatted}`,
+          `  Last Active: ${lastActiveFormatted} ago`,
+          `  Messages: ${session.messageCount}`,
+          session.claudeSessionId ? `  Claude Session: ${session.claudeSessionId}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n");
+      });
+
+      const text = `Found ${sessions.length} session(s):\n\n${lines.join("\n\n")}`;
 
       return {
         content: [{ type: "text", text }],

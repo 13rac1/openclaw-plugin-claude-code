@@ -13,15 +13,20 @@ RUN set -eux; \
         build-essential \
         ca-certificates \
         curl \
+        fd-find \
         git \
         gnupg \
         jq \
+        less \
+        openssh-client \
         procps \
         python3 \
         python3-pip \
         python3-venv \
         ripgrep \
-        strace; \
+        sqlite3 \
+        strace \
+        unzip; \
     # Install Go
     curl -fsSL "https://go.dev/dl/go1.22.5.linux-${ARCH}.tar.gz" | tar -C /usr/local -xz; \
     # Install TinyGo

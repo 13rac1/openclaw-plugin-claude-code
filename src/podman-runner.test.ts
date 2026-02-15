@@ -34,6 +34,7 @@ describe("PodmanRunner", () => {
     memory: "512m",
     cpus: "1.0",
     network: "none",
+    maxOutputSize: 0, // Unlimited by default for existing tests
   };
 
   let runner: PodmanRunner;
@@ -349,22 +350,33 @@ describe("PodmanRunner", () => {
     });
 
     it("clears startup timeout on first output", async () => {
-      const mockProc = createMockProcess();
-      mockSpawn.mockReturnValue(mockProc);
+      // Use mockImplementation to return new mock processes for metrics interval calls
+      const mainProc = createMockProcess();
+      let callCount = 0;
+      mockSpawn.mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) {
+          return mainProc;
+        }
+        // Return fresh mock for metrics interval stats calls
+        const metricsProc = createMockProcess();
+        setImmediate(() => metricsProc.emit("close", 1)); // Stats fail immediately
+        return metricsProc;
+      });
 
       const executePromise = (runner as any).execute(["run"], "test-container");
 
       // Emit output immediately (before any timer advancement)
-      (mockProc.stdout as EventEmitter).emit("data", Buffer.from("output"));
+      (mainProc.stdout as EventEmitter).emit("data", Buffer.from("output"));
 
       // Advance past startup timeout - should not kill because we already got output
       vi.advanceTimersByTime(35000);
 
-      // Process should NOT be killed (got output before timeout)
-      expect(mockProc.kill).not.toHaveBeenCalled();
+      // Main process should NOT be killed (got output before timeout)
+      expect(mainProc.kill).not.toHaveBeenCalled();
 
       // Complete normally
-      mockProc.emit("close", 0);
+      mainProc.emit("close", 0);
 
       const result = await executePromise;
       expect(result.content).toBe("output");
@@ -401,26 +413,37 @@ describe("PodmanRunner", () => {
     });
 
     it("resets idle timer on each output", async () => {
-      const mockProc = createMockProcess();
-      mockSpawn.mockReturnValue(mockProc);
+      // Use mockImplementation to return new mock processes for metrics interval calls
+      const mainProc = createMockProcess();
+      let callCount = 0;
+      mockSpawn.mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) {
+          return mainProc;
+        }
+        // Return fresh mock for metrics interval stats calls
+        const metricsProc = createMockProcess();
+        setImmediate(() => metricsProc.emit("close", 1)); // Stats fail immediately
+        return metricsProc;
+      });
 
       const executePromise = (runner as any).execute(["run"], "test-container");
 
       // Emit output and advance time in sequence
-      (mockProc.stdout as EventEmitter).emit("data", Buffer.from("output1"));
+      (mainProc.stdout as EventEmitter).emit("data", Buffer.from("output1"));
       vi.advanceTimersByTime(60000); // 60s idle
 
-      (mockProc.stdout as EventEmitter).emit("data", Buffer.from("output2"));
+      (mainProc.stdout as EventEmitter).emit("data", Buffer.from("output2"));
       vi.advanceTimersByTime(60000); // 60s idle
 
-      (mockProc.stdout as EventEmitter).emit("data", Buffer.from("output3"));
+      (mainProc.stdout as EventEmitter).emit("data", Buffer.from("output3"));
       vi.advanceTimersByTime(60000); // 60s idle
 
-      // Process should NOT be killed (we kept getting output before 120s idle)
-      expect(mockProc.kill).not.toHaveBeenCalled();
+      // Main process should NOT be killed (we kept getting output before 120s idle)
+      expect(mainProc.kill).not.toHaveBeenCalled();
 
       // Complete normally
-      mockProc.emit("close", 0);
+      mainProc.emit("close", 0);
 
       const result = await executePromise;
       expect(result.content).toBe("output1output2output3");
@@ -539,6 +562,7 @@ describe("PodmanRunner", () => {
         ...config,
         startupTimeout: 1,
         idleTimeout: 1,
+        maxOutputSize: 0,
       });
 
       const runPromise = testRunner.runClaudeCode({
@@ -637,6 +661,275 @@ describe("PodmanRunner", () => {
       expect(spawnCount).toBe(3);
 
       vi.useFakeTimers();
+    });
+  });
+
+  describe("parseMemoryString", () => {
+    it("parses MiB values", () => {
+      expect((runner as any).parseMemoryString("256MiB")).toBe(256);
+      expect((runner as any).parseMemoryString("512.5MiB")).toBeCloseTo(512.5);
+    });
+
+    it("parses MB values", () => {
+      expect((runner as any).parseMemoryString("256MB")).toBe(256);
+      expect((runner as any).parseMemoryString("100.5MB")).toBeCloseTo(100.5);
+    });
+
+    it("parses GiB values", () => {
+      expect((runner as any).parseMemoryString("1GiB")).toBe(1024);
+      expect((runner as any).parseMemoryString("2.5GiB")).toBe(2560);
+    });
+
+    it("parses KiB values", () => {
+      expect((runner as any).parseMemoryString("1024KiB")).toBe(1);
+      expect((runner as any).parseMemoryString("2048KiB")).toBe(2);
+    });
+
+    it("parses B values", () => {
+      expect((runner as any).parseMemoryString("1048576B")).toBeCloseTo(1);
+    });
+
+    it("handles 'used / limit' format", () => {
+      expect((runner as any).parseMemoryString("256MiB / 512MiB")).toBe(256);
+    });
+
+    it("returns undefined for invalid input", () => {
+      expect((runner as any).parseMemoryString(undefined)).toBeUndefined();
+      expect((runner as any).parseMemoryString("")).toBeUndefined();
+      expect((runner as any).parseMemoryString("invalid")).toBeUndefined();
+    });
+  });
+
+  describe("getContainerStats", () => {
+    it("parses podman stats JSON output", async () => {
+      const mockProc = createMockProcess();
+      mockSpawn.mockReturnValue(mockProc);
+
+      const statsPromise = runner.getContainerStats("test-container");
+
+      (mockProc.stdout as EventEmitter).emit(
+        "data",
+        Buffer.from(
+          JSON.stringify({
+            MemUsage: "256MiB",
+            MemLimit: "512MiB",
+            MemPerc: "50.00%",
+            CPUPerc: "25.00%",
+          })
+        )
+      );
+      mockProc.emit("close", 0);
+
+      const result = await statsPromise;
+
+      expect(result).toEqual({
+        memoryUsageMB: 256,
+        memoryLimitMB: 512,
+        memoryPercent: 50,
+        cpuPercent: 25,
+      });
+
+      expect(mockSpawn).toHaveBeenCalledWith(
+        "podman",
+        ["stats", "--no-stream", "--format", "json", "test-container"],
+        { stdio: ["ignore", "pipe", "ignore"] }
+      );
+    });
+
+    it("parses array format stats output", async () => {
+      const mockProc = createMockProcess();
+      mockSpawn.mockReturnValue(mockProc);
+
+      const statsPromise = runner.getContainerStats("test-container");
+
+      (mockProc.stdout as EventEmitter).emit(
+        "data",
+        Buffer.from(
+          JSON.stringify([
+            {
+              MemUsage: "128MiB",
+              MemLimit: "256MiB",
+              MemPerc: "50%",
+              CPUPerc: "10%",
+            },
+          ])
+        )
+      );
+      mockProc.emit("close", 0);
+
+      const result = await statsPromise;
+
+      expect(result).toEqual({
+        memoryUsageMB: 128,
+        memoryLimitMB: 256,
+        memoryPercent: 50,
+        cpuPercent: 10,
+      });
+    });
+
+    it("returns undefined on error", async () => {
+      const mockProc = createMockProcess();
+      mockSpawn.mockReturnValue(mockProc);
+
+      const statsPromise = runner.getContainerStats("test-container");
+
+      mockProc.emit("error", new Error("container not found"));
+
+      const result = await statsPromise;
+      expect(result).toBeUndefined();
+    });
+
+    it("returns undefined on non-zero exit", async () => {
+      const mockProc = createMockProcess();
+      mockSpawn.mockReturnValue(mockProc);
+
+      const statsPromise = runner.getContainerStats("test-container");
+
+      mockProc.emit("close", 1);
+
+      const result = await statsPromise;
+      expect(result).toBeUndefined();
+    });
+
+    it("returns undefined on invalid JSON", async () => {
+      const mockProc = createMockProcess();
+      mockSpawn.mockReturnValue(mockProc);
+
+      const statsPromise = runner.getContainerStats("test-container");
+
+      (mockProc.stdout as EventEmitter).emit("data", Buffer.from("not json"));
+      mockProc.emit("close", 0);
+
+      const result = await statsPromise;
+      expect(result).toBeUndefined();
+    });
+
+    it("returns undefined on empty array", async () => {
+      const mockProc = createMockProcess();
+      mockSpawn.mockReturnValue(mockProc);
+
+      const statsPromise = runner.getContainerStats("test-container");
+
+      (mockProc.stdout as EventEmitter).emit("data", Buffer.from("[]"));
+      mockProc.emit("close", 0);
+
+      const result = await statsPromise;
+      expect(result).toBeUndefined();
+    });
+  });
+
+  describe("output truncation", () => {
+    it("truncates output when exceeding maxOutputSize", async () => {
+      const limitedRunner = new PodmanRunner({
+        ...config,
+        maxOutputSize: 100,
+      });
+
+      const mockProc = createMockProcess();
+      mockSpawn.mockReturnValue(mockProc);
+
+      const executePromise = (limitedRunner as any).execute(["run"], "test-container");
+
+      // Emit 150 bytes of output
+      const largeOutput = "x".repeat(150);
+      (mockProc.stdout as EventEmitter).emit("data", Buffer.from(largeOutput));
+      mockProc.emit("close", 0);
+
+      const result = await executePromise;
+
+      expect(result.content.length).toBe(100);
+      expect(result.outputTruncated).toBe(true);
+      expect(result.originalSize).toBe(150);
+    });
+
+    it("does not truncate when under limit", async () => {
+      const limitedRunner = new PodmanRunner({
+        ...config,
+        maxOutputSize: 1000,
+      });
+
+      const mockProc = createMockProcess();
+      mockSpawn.mockReturnValue(mockProc);
+
+      const executePromise = (limitedRunner as any).execute(["run"], "test-container");
+
+      const smallOutput = "x".repeat(100);
+      (mockProc.stdout as EventEmitter).emit("data", Buffer.from(smallOutput));
+      mockProc.emit("close", 0);
+
+      const result = await executePromise;
+
+      expect(result.content.length).toBe(100);
+      expect(result.outputTruncated).toBeUndefined();
+      expect(result.originalSize).toBeUndefined();
+    });
+
+    it("does not truncate when maxOutputSize is 0 (unlimited)", async () => {
+      const unlimitedRunner = new PodmanRunner({
+        ...config,
+        maxOutputSize: 0,
+      });
+
+      const mockProc = createMockProcess();
+      mockSpawn.mockReturnValue(mockProc);
+
+      const executePromise = (unlimitedRunner as any).execute(["run"], "test-container");
+
+      const largeOutput = "x".repeat(10000);
+      (mockProc.stdout as EventEmitter).emit("data", Buffer.from(largeOutput));
+      mockProc.emit("close", 0);
+
+      const result = await executePromise;
+
+      expect(result.content.length).toBe(10000);
+      expect(result.outputTruncated).toBeUndefined();
+    });
+
+    it("tracks total size across multiple chunks", async () => {
+      const limitedRunner = new PodmanRunner({
+        ...config,
+        maxOutputSize: 100,
+      });
+
+      const mockProc = createMockProcess();
+      mockSpawn.mockReturnValue(mockProc);
+
+      const executePromise = (limitedRunner as any).execute(["run"], "test-container");
+
+      // Emit output in chunks
+      (mockProc.stdout as EventEmitter).emit("data", Buffer.from("x".repeat(40)));
+      (mockProc.stdout as EventEmitter).emit("data", Buffer.from("y".repeat(40)));
+      (mockProc.stdout as EventEmitter).emit("data", Buffer.from("z".repeat(40))); // This exceeds limit
+      mockProc.emit("close", 0);
+
+      const result = await executePromise;
+
+      expect(result.content.length).toBe(100);
+      expect(result.outputTruncated).toBe(true);
+      expect(result.originalSize).toBe(120);
+    });
+
+    it("truncates stderr when combined output exceeds limit", async () => {
+      const limitedRunner = new PodmanRunner({
+        ...config,
+        maxOutputSize: 100,
+      });
+
+      const mockProc = createMockProcess();
+      mockSpawn.mockReturnValue(mockProc);
+
+      const executePromise = (limitedRunner as any).execute(["run"], "test-container");
+
+      // Emit stdout then stderr
+      (mockProc.stdout as EventEmitter).emit("data", Buffer.from("x".repeat(60)));
+      (mockProc.stderr as EventEmitter).emit("data", Buffer.from("e".repeat(60)));
+      mockProc.emit("close", 0);
+
+      const result = await executePromise;
+
+      // Total output should be truncated to 100 bytes
+      expect(result.outputTruncated).toBe(true);
+      expect(result.originalSize).toBe(120);
     });
   });
 });

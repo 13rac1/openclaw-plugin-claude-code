@@ -9,6 +9,7 @@ export interface PodmanConfig {
   cpus: string;
   network: string;
   apparmorProfile?: string; // AppArmor profile name (empty = disabled)
+  maxOutputSize: number; // Maximum output size in bytes (0 = unlimited)
 }
 
 export type ErrorType =
@@ -18,12 +19,22 @@ export type ErrorType =
   | "crash"
   | "spawn_failed";
 
+export interface ResourceMetrics {
+  memoryUsageMB?: number;
+  memoryLimitMB?: number;
+  memoryPercent?: number;
+  cpuPercent?: number;
+}
+
 export interface ClaudeCodeResult {
   content: string;
   sessionId: string | null;
   exitCode: number;
   elapsedSeconds?: number;
   errorType?: ErrorType;
+  outputTruncated?: boolean;
+  originalSize?: number;
+  metrics?: ResourceMetrics;
 }
 
 export class PodmanRunner {
@@ -136,10 +147,15 @@ export class PodmanRunner {
       let killReason: ErrorType | null = null;
       let lastActivity = Date.now();
       let hadOutput = false;
+      let totalOutputSize = 0;
+      let outputTruncated = false;
+      const maxSize = this.config.maxOutputSize;
+      let lastMetrics: ResourceMetrics | undefined;
 
       const cleanup = () => {
         clearTimeout(startupTimeoutId);
         clearInterval(idleCheckInterval);
+        clearInterval(metricsInterval);
       };
 
       const killProcess = (reason: ErrorType) => {
@@ -172,6 +188,15 @@ export class PodmanRunner {
         }
       }, 5000);
 
+      // Periodically sample container metrics (every 10s)
+      const metricsInterval = setInterval(async () => {
+        if (!hadOutput) return; // Container not started yet
+        const metrics = await this.getContainerStats(containerName);
+        if (metrics) {
+          lastMetrics = metrics;
+        }
+      }, 10000);
+
       const onOutput = () => {
         if (!hadOutput) {
           hadOutput = true;
@@ -182,12 +207,34 @@ export class PodmanRunner {
 
       proc.stdout.on("data", (data: Buffer) => {
         onOutput();
-        stdout += data.toString();
+        const dataStr = data.toString();
+        if (maxSize > 0 && totalOutputSize + dataStr.length > maxSize) {
+          if (!outputTruncated) {
+            const remaining = maxSize - totalOutputSize;
+            stdout += dataStr.slice(0, remaining);
+            outputTruncated = true;
+          }
+          totalOutputSize += dataStr.length;
+        } else {
+          stdout += dataStr;
+          totalOutputSize += dataStr.length;
+        }
       });
 
       proc.stderr.on("data", (data: Buffer) => {
         onOutput();
-        stderr += data.toString();
+        const dataStr = data.toString();
+        if (maxSize > 0 && totalOutputSize + dataStr.length > maxSize) {
+          if (!outputTruncated) {
+            const remaining = maxSize - totalOutputSize;
+            stderr += dataStr.slice(0, remaining);
+            outputTruncated = true;
+          }
+          totalOutputSize += dataStr.length;
+        } else {
+          stderr += dataStr;
+          totalOutputSize += dataStr.length;
+        }
       });
 
       proc.on("error", (err) => {
@@ -247,6 +294,13 @@ export class PodmanRunner {
 
         const result = this.parseOutput(stdout, code ?? 0);
         result.elapsedSeconds = elapsed;
+        if (outputTruncated) {
+          result.outputTruncated = true;
+          result.originalSize = totalOutputSize;
+        }
+        if (lastMetrics) {
+          result.metrics = lastMetrics;
+        }
         resolve(result);
       });
     });
@@ -335,5 +389,96 @@ export class PodmanRunner {
       if (exists) return true;
     }
     return false;
+  }
+
+  /**
+   * Get resource metrics for a running container.
+   * Returns undefined if container is not running or stats unavailable.
+   */
+  getContainerStats(containerName: string): Promise<ResourceMetrics | undefined> {
+    return new Promise((resolve) => {
+      const proc = spawn(
+        this.config.runtime,
+        ["stats", "--no-stream", "--format", "json", containerName],
+        { stdio: ["ignore", "pipe", "ignore"] }
+      );
+
+      let stdout = "";
+      let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+      proc.stdout.on("data", (data: Buffer) => {
+        stdout += data.toString();
+      });
+
+      proc.on("error", () => resolve(undefined));
+      proc.on("close", (code) => {
+        if (timeoutId) clearTimeout(timeoutId);
+        if (code !== 0) {
+          resolve(undefined);
+          return;
+        }
+
+        try {
+          const stats = JSON.parse(stdout);
+          // Podman stats JSON format - may be array or single object
+          const stat = Array.isArray(stats) ? stats[0] : stats;
+          if (!stat) {
+            resolve(undefined);
+            return;
+          }
+
+          const memUsage = this.parseMemoryString(stat.MemUsage || stat.mem_usage);
+          const memLimit = this.parseMemoryString(stat.MemLimit || stat.mem_limit);
+
+          resolve({
+            memoryUsageMB: memUsage,
+            memoryLimitMB: memLimit,
+            memoryPercent: stat.MemPerc ? parseFloat(String(stat.MemPerc).replace("%", "")) : undefined,
+            cpuPercent: stat.CPUPerc ? parseFloat(String(stat.CPUPerc).replace("%", "")) : undefined,
+          });
+        } catch {
+          resolve(undefined);
+        }
+      });
+
+      // Timeout after 5s
+      timeoutId = setTimeout(() => {
+        proc.kill();
+        resolve(undefined);
+      }, 5000);
+    });
+  }
+
+  /**
+   * Parse memory string like "123.4MiB" or "1.2GiB" to MB
+   */
+  parseMemoryString(memStr: string | undefined): number | undefined {
+    if (!memStr) return undefined;
+
+    // Handle "used / limit" format (e.g., "256MiB / 512MiB")
+    const parts = String(memStr).split("/");
+    const valueStr = parts[0].trim();
+
+    const match = valueStr.match(/^([\d.]+)\s*(B|KB|KiB|MB|MiB|GB|GiB)/i);
+    if (!match) return undefined;
+
+    const value = parseFloat(match[1]);
+    const unit = match[2].toLowerCase();
+
+    switch (unit) {
+      case "b":
+        return value / (1024 * 1024);
+      case "kb":
+      case "kib":
+        return value / 1024;
+      case "mb":
+      case "mib":
+        return value;
+      case "gb":
+      case "gib":
+        return value * 1024;
+      default:
+        return undefined;
+    }
   }
 }
