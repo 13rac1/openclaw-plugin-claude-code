@@ -32,8 +32,9 @@ jobs:
 
       - name: Create release zip
         run: |
+          cp openclaw.plugin.json dist/
           zip -r openclaw-plugin-claude-code-${{ steps.version.outputs.VERSION }}.zip \
-            dist/ package.json openclaw.plugin.json LICENSE README.md
+            dist/ package.json LICENSE README.md
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
