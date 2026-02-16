@@ -456,7 +456,7 @@ describe("PodmanRunner", () => {
       vi.useFakeTimers();
     });
 
-    it("uses --userns=keep-id for rootless podman UID mapping", async () => {
+    it("uses --userns=keep-id and --user for rootless podman UID mapping", async () => {
       vi.useRealTimers();
 
       const mockKillProc = createMockProcess();
@@ -485,11 +485,17 @@ describe("PodmanRunner", () => {
 
       await promise;
 
-      // Verify --userns=keep-id was added
       const runCall = mockSpawn.mock.calls[2];
       const args = runCall[1] as string[];
 
+      // Verify --userns=keep-id was added
       expect(args).toContain("--userns=keep-id");
+
+      // Verify --user flag is present with UID:GID format
+      expect(args).toContain("--user");
+      const userIndex = args.indexOf("--user");
+      expect(userIndex).toBeGreaterThan(-1);
+      expect(args[userIndex + 1]).toMatch(/^\d+:\d+$/);
 
       vi.useFakeTimers();
     });

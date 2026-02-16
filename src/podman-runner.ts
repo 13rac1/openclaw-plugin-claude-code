@@ -267,6 +267,8 @@ export class PodmanRunner {
       "--name",
       containerName,
       "--userns=keep-id",
+      "--user",
+      `${String(process.getuid?.() ?? 1000)}:${String(process.getgid?.() ?? 1000)}`,
       "--network",
       this.config.network,
       "--cap-drop",
