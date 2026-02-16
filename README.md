@@ -7,7 +7,34 @@
 [![Node.js](https://img.shields.io/badge/node-%3E%3D22-brightgreen.svg)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue.svg)](https://www.typescriptlang.org/)
 
-An [OpenClaw](https://openclaw.ai) plugin that runs Claude Code CLI sessions in isolated Podman (or Docker) containers. This enables OpenClaw agents to delegate complex coding tasks to Claude Code while maintaining security through containerization.
+**Run Claude Code in secure, isolated containers with your Claude Max subscription.**
+
+An [OpenClaw](https://openclaw.ai) plugin that executes [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI sessions in rootless Podman containers. Let your AI agents delegate complex coding tasks to Claude Code without risking your host system.
+
+## Why Use This Plugin?
+
+### Use Your Claude Max Credits
+
+Have a Claude Max subscription? This plugin lets you use your existing subscription credits for agentic coding tasks instead of paying per-token API costs. Your OAuth credentials are securely passed to containerized Claude Code sessions.
+
+### Contain the Blast Radius
+
+Claude Code with `--dangerously-skip-permissions` can modify any file and run any command. This plugin contains each session in a rootless container with:
+
+- All Linux capabilities dropped
+- Configurable network isolation
+- Memory and CPU limits
+- Optional AppArmor profiles
+
+Bad code, infinite loops, or accidental `rm -rf` stays inside the container. Your host system remains untouched.
+
+### Parallel Workspaces
+
+Run multiple Claude Code sessions simultaneously, each in its own isolated workspace. Sessions maintain state across interactions, enabling complex multi-step workflows without interference.
+
+### Works With Any OpenClaw Agent
+
+Any OpenClaw agent can use the `claude_code_start` tool to offload coding tasks. The orchestrating agent stays lightweight while Claude Code handles the heavy lifting in its own container.
 
 ## Features
 
