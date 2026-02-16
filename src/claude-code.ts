@@ -120,18 +120,24 @@ export default function register(api: PluginApi): void {
     try {
       await fs.access(hostCredsPath);
       hasCredsFile = true;
-    } catch {
+      console.error(`[claude-code] Found credentials file: ${hostCredsPath}`);
+    } catch (err) {
       // No credentials file
+      const errMsg = err instanceof Error ? err.message : "unknown error";
+      console.error(`[claude-code] No credentials file at ${hostCredsPath}: ${errMsg}`);
     }
 
     const apiKey = hasCredsFile ? undefined : process.env.ANTHROPIC_API_KEY;
 
     if (!apiKey && !hasCredsFile) {
       throw new Error(
-        "No authentication available. Set ANTHROPIC_API_KEY or have ~/.claude/.credentials.json"
+        `No authentication available. Set ANTHROPIC_API_KEY or create ${hostCredsPath}`
       );
     }
 
+    console.error(
+      `[claude-code] Auth: hasCredsFile=${String(hasCredsFile)}, hasApiKey=${String(!!apiKey)}`
+    );
     return { apiKey, hasCredsFile };
   }
 
@@ -187,6 +193,10 @@ export default function register(api: PluginApi): void {
       const claudeDir = `${config.sessionsDir.replace("~", process.env.HOME ?? "")}/${sessionKey}/.claude`;
       const workspaceDir = sessionManager.workspaceDir(sessionKey);
       const hostCredsPath = hasCredsFile ? getHostCredsPath() : undefined;
+
+      console.error(
+        `[claude-code] Volume mounts: claudeDir=${claudeDir}, hostCredsPath=${hostCredsPath ?? "none"}`
+      );
 
       // Create job record
       const containerName = podmanRunner.containerNameFromSessionKey(sessionKey);

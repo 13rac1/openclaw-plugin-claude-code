@@ -293,7 +293,11 @@ export class PodmanRunner {
 
     // Mount host credentials file as read-only overlay (after .claude dir mount)
     if (params.hostCredsPath) {
-      args.push("-v", `${params.hostCredsPath}:/home/claude/.claude/.credentials.json:ro`);
+      const credsMount = `${params.hostCredsPath}:/home/claude/.claude/.credentials.json:ro`;
+      console.error(`[podman-runner] Adding credentials mount: ${credsMount}`);
+      args.push("-v", credsMount);
+    } else {
+      console.error("[podman-runner] No hostCredsPath provided, skipping credentials mount");
     }
 
     if (params.apiKey) {
