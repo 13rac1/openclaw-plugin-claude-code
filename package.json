@@ -1,6 +1,6 @@
 {
   "name": "@13rac1/openclaw-plugin-claude-code",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "OpenClaw plugin for running Claude Code CLI in isolated Podman containers",
   "type": "module",
   "license": "Apache-2.0",
