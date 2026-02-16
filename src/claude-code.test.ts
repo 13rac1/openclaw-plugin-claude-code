@@ -303,29 +303,6 @@ describe("register", () => {
       expect(parsed.status).toBe("running");
       expect(mockPodmanRunner.startDetached).toHaveBeenCalled();
     });
-
-    it("handles credentials copy failure", async () => {
-      vi.mocked(fs.access).mockResolvedValue(undefined);
-      vi.mocked(fs.mkdir).mockResolvedValue(undefined);
-      vi.mocked(fs.copyFile).mockRejectedValue(new Error("Permission denied"));
-      mockPodmanRunner.checkImage.mockResolvedValue(true);
-      mockSessionManager.getOrCreateSession.mockResolvedValue({
-        sessionKey: "session-test-id",
-        claudeSessionId: null,
-      });
-      mockSessionManager.getActiveJob.mockResolvedValue(null);
-      mockSessionManager.workspaceDir.mockReturnValue("/tmp/workspace");
-
-      register(mockApi);
-
-      const toolConfig = mockApi.registerTool.mock.calls.find(
-        (call: unknown[]) => (call[0] as { name: string }).name === "claude_code_start"
-      )?.[0] as { execute: (id: string, params: Record<string, unknown>) => Promise<unknown> };
-
-      await expect(toolConfig.execute("test-id", { prompt: "hello" })).rejects.toThrow(
-        "Failed to copy credentials file"
-      );
-    });
   });
 
   describe("claude_code_status tool execute", () => {

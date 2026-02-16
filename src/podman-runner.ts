@@ -126,6 +126,7 @@ export class PodmanRunner {
     workspaceDir: string;
     resumeSessionId?: string;
     apiKey?: string;
+    hostCredsPath?: string;
   }): Promise<ClaudeCodeResult> {
     const containerName = `claude-${params.sessionKey.replace(/[^a-zA-Z0-9-]/g, "-")}`;
 
@@ -144,6 +145,7 @@ export class PodmanRunner {
       workspaceDir: string;
       resumeSessionId?: string;
       apiKey?: string;
+      hostCredsPath?: string;
     },
     containerName: string
   ): string[] {
@@ -185,6 +187,11 @@ export class PodmanRunner {
       "-v",
       `${params.workspaceDir}:/workspace:U`
     );
+
+    // Mount host credentials file as read-only overlay (after .claude dir mount)
+    if (params.hostCredsPath) {
+      args.push("-v", `${params.hostCredsPath}:/home/claude/.claude/.credentials.json:ro`);
+    }
 
     // Only add API key if provided (otherwise uses credentials file)
     if (params.apiKey) {
@@ -550,6 +557,7 @@ export class PodmanRunner {
     workspaceDir: string;
     resumeSessionId?: string;
     apiKey?: string;
+    hostCredsPath?: string;
   }): Promise<DetachedStartResult> {
     const containerName = `claude-${params.sessionKey.replace(/[^a-zA-Z0-9-]/g, "-")}`;
 
@@ -590,6 +598,11 @@ export class PodmanRunner {
       "-v",
       `${params.workspaceDir}:/workspace:U`
     );
+
+    // Mount host credentials file as read-only overlay (after .claude dir mount)
+    if (params.hostCredsPath) {
+      args.push("-v", `${params.hostCredsPath}:/home/claude/.claude/.credentials.json:ro`);
+    }
 
     if (params.apiKey) {
       args.push("-e", `ANTHROPIC_API_KEY=${params.apiKey}`);

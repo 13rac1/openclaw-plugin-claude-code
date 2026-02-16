@@ -135,17 +135,9 @@ export default function register(api: PluginApi): void {
     return { apiKey, hasCredsFile };
   }
 
-  // Helper to copy credentials to session directory
-  async function copyCredentials(claudeDir: string): Promise<void> {
-    const hostCredsPath = path.join(homedir(), ".claude", ".credentials.json");
-    const sessionCredsPath = path.join(claudeDir, ".credentials.json");
-    try {
-      await fs.mkdir(claudeDir, { recursive: true });
-      await fs.copyFile(hostCredsPath, sessionCredsPath);
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      throw new Error(`Failed to copy credentials file: ${message}`);
-    }
+  // Get path to host credentials file
+  function getHostCredsPath(): string {
+    return path.join(homedir(), ".claude", ".credentials.json");
   }
 
   // Register claude_code_start tool
@@ -194,11 +186,7 @@ export default function register(api: PluginApi): void {
       // Get paths for volume mounts
       const claudeDir = `${config.sessionsDir.replace("~", process.env.HOME ?? "")}/${sessionKey}/.claude`;
       const workspaceDir = sessionManager.workspaceDir(sessionKey);
-
-      // Copy credentials file if needed
-      if (hasCredsFile) {
-        await copyCredentials(claudeDir);
-      }
+      const hostCredsPath = hasCredsFile ? getHostCredsPath() : undefined;
 
       // Create job record
       const containerName = podmanRunner.containerNameFromSessionKey(sessionKey);
@@ -213,6 +201,7 @@ export default function register(api: PluginApi): void {
           workspaceDir,
           resumeSessionId: session.claudeSessionId ?? undefined,
           apiKey,
+          hostCredsPath,
         });
 
         // Update job status to running

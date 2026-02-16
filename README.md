@@ -38,10 +38,10 @@ Download the release zip from [GitHub Releases](https://github.com/13rac1/opencl
 
 ```bash
 # Download latest release
-curl -LO https://github.com/13rac1/openclaw-plugin-claude-code/releases/latest/download/openclaw-plugin-claude-code-1.0.0.zip
+curl -LO https://github.com/13rac1/openclaw-plugin-claude-code/releases/latest/download/openclaw-plugin-claude-code-1.0.4.zip
 
 # Extract to plugins directory
-unzip openclaw-plugin-claude-code-1.0.0.zip -d ~/.openclaw/plugins/openclaw-plugin-claude-code
+unzip openclaw-plugin-claude-code-1.0.4.zip -d ~/.openclaw/plugins/openclaw-plugin-claude-code
 ```
 
 ### Container Image
