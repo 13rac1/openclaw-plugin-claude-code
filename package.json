@@ -1,6 +1,6 @@
 {
   "name": "@13rac1/openclaw-plugin-claude-code",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "OpenClaw plugin for running Claude Code CLI in isolated Podman containers",
   "type": "module",
   "license": "Apache-2.0",
@@ -34,7 +34,7 @@
     "openclaw.plugin.json"
   ],
   "scripts": {
-    "build": "tsc && esbuild src/claude-code.ts --bundle --platform=node --format=esm --outfile=dist/claude-code.js --external:openclaw",
+    "build": "tsc && esbuild src/claude-code.ts --bundle --platform=node --format=esm --outfile=dist/claude-code.js --external:openclaw && cp openclaw.plugin.json dist/",
     "clean": "rm -rf dist coverage",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
