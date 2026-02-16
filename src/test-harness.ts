@@ -10,7 +10,6 @@
 import { PodmanRunner } from "./podman-runner.js";
 import { SessionManager } from "./session-manager.js";
 import { execSync } from "node:child_process";
-import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { homedir } from "node:os";
 
@@ -89,57 +88,68 @@ async function main(): Promise<void> {
   console.log("Workspace dir:", workspaceDir);
   console.log("");
 
-  // Write credentials to session directory if we have them from keychain
-  if (credentials) {
-    const credsPath = path.join(claudeDir, ".credentials.json");
-    await fs.mkdir(claudeDir, { recursive: true });
-    await fs.writeFile(credsPath, credentials);
-    console.log("✓ Wrote credentials to:", credsPath);
-    console.log("");
-  }
+  // Credentials are now mounted read-only from host, no need to copy
 
-  // Run Claude Code
+  // Run Claude Code (async)
   const prompt = "Say 'Hello from test harness!' and nothing else";
-  console.log("=== Running Claude Code ===");
+  console.log("=== Running Claude Code (async) ===");
   console.log("Prompt:", prompt);
   console.log("");
 
   const startTime = Date.now();
 
   try {
-    const result = await podmanRunner.runClaudeCode({
+    // Start container in detached mode
+    const { containerName } = await podmanRunner.startDetached({
       sessionKey,
       prompt,
       claudeDir,
       workspaceDir,
       resumeSessionId: session.claudeSessionId ?? undefined,
       apiKey: credentials ? undefined : process.env.ANTHROPIC_API_KEY,
+      hostCredsPath: credentials ? path.join(homedir(), ".claude", ".credentials.json") : undefined,
     });
+    console.log("✓ Container started:", containerName);
+
+    // Poll for completion
+    let status = await podmanRunner.getContainerStatus(containerName);
+    while (status?.running) {
+      process.stdout.write(".");
+      await new Promise((r) => setTimeout(r, 1000));
+      status = await podmanRunner.getContainerStatus(containerName);
+    }
+    console.log(" done");
+
+    // Get output
+    const output = await podmanRunner.getContainerLogs(containerName);
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
     console.log("=== Result ===");
-    console.log("Exit code:", result.exitCode);
-    console.log("Session ID:", result.sessionId);
+    console.log("Exit code:", status?.exitCode ?? "unknown");
     console.log("Elapsed:", elapsed, "s");
     console.log("Content:");
     console.log("---");
-    console.log(result.content);
+    console.log(output ?? "(no output)");
     console.log("---");
-    console.log("\n✓ SUCCESS");
+
+    if (status?.exitCode === 0) {
+      console.log("\n✓ SUCCESS");
+    } else {
+      console.log("\n✗ FAILED (exit code:", status?.exitCode, ")");
+      process.exit(1);
+    }
   } catch (err: unknown) {
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
     console.log("=== Error ===");
     const message = err instanceof Error ? err.message : String(err);
-    const errorType =
-      err instanceof Error && "errorType" in err ? String(err.errorType) : "unknown";
     console.log("Message:", message);
-    console.log("Error type:", errorType);
     console.log("Elapsed:", elapsed, "s");
     console.log("\n✗ FAILED");
     process.exit(1);
   } finally {
     // Cleanup
     console.log("\nCleaning up...");
+    await podmanRunner.killContainer(sessionKey);
     await sessionManager.deleteSession(sessionKey);
     console.log("✓ Session deleted");
   }
