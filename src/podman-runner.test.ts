@@ -456,7 +456,7 @@ describe("PodmanRunner", () => {
       vi.useFakeTimers();
     });
 
-    it("mounts credentials file as read-only when hostCredsPath provided", async () => {
+    it("uses --userns=keep-id for rootless podman UID mapping", async () => {
       vi.useRealTimers();
 
       const mockKillProc = createMockProcess();
@@ -469,11 +469,10 @@ describe("PodmanRunner", () => {
         .mockReturnValueOnce(mockRunProc);
 
       const promise = runner.startDetached({
-        sessionKey: "creds-test",
-        prompt: "test with creds",
+        sessionKey: "userns-test",
+        prompt: "test userns",
         claudeDir: "/path/.claude",
         workspaceDir: "/path/workspace",
-        hostCredsPath: "/home/user/.claude/.credentials.json",
       });
 
       mockKillProc.emit("close", 0);
@@ -486,23 +485,16 @@ describe("PodmanRunner", () => {
 
       await promise;
 
-      // Verify the credentials mount was added
+      // Verify --userns=keep-id was added
       const runCall = mockSpawn.mock.calls[2];
       const args = runCall[1] as string[];
 
-      // Find the credentials mount
-      const credsMount = args.find(
-        (arg) => arg.includes(".credentials.json") && arg.includes(":ro")
-      );
-      expect(credsMount).toBeDefined();
-      expect(credsMount).toBe(
-        "/home/user/.claude/.credentials.json:/home/claude/.claude/.credentials.json:ro"
-      );
+      expect(args).toContain("--userns=keep-id");
 
       vi.useFakeTimers();
     });
 
-    it("does not mount credentials when hostCredsPath not provided", async () => {
+    it("mounts volumes with :rw instead of :U", async () => {
       vi.useRealTimers();
 
       const mockKillProc = createMockProcess();
@@ -515,12 +507,10 @@ describe("PodmanRunner", () => {
         .mockReturnValueOnce(mockRunProc);
 
       const promise = runner.startDetached({
-        sessionKey: "no-creds-test",
-        prompt: "test without creds",
+        sessionKey: "mount-test",
+        prompt: "test mounts",
         claudeDir: "/path/.claude",
         workspaceDir: "/path/workspace",
-        apiKey: "sk-test-key",
-        // Note: no hostCredsPath
       });
 
       mockKillProc.emit("close", 0);
@@ -533,14 +523,19 @@ describe("PodmanRunner", () => {
 
       await promise;
 
-      // Verify no credentials mount was added
       const runCall = mockSpawn.mock.calls[2];
       const args = runCall[1] as string[];
 
-      const credsMount = args.find(
-        (arg) => arg.includes(".credentials.json") && arg.includes(":ro")
-      );
-      expect(credsMount).toBeUndefined();
+      // Verify :rw mounts (not :U)
+      const claudeMount = args.find((arg) => arg.includes("/home/claude/.claude"));
+      const workspaceMount = args.find((arg) => arg.includes("/workspace"));
+
+      expect(claudeMount).toBe("/path/.claude:/home/claude/.claude:rw");
+      expect(workspaceMount).toBe("/path/workspace:/workspace:rw");
+
+      // Verify no :U mounts
+      const uMounts = args.filter((arg) => arg.endsWith(":U"));
+      expect(uMounts).toHaveLength(0);
 
       vi.useFakeTimers();
     });

@@ -173,30 +173,28 @@ describe.skipIf(!podmanAvailable)("PodmanRunner container execution (integration
 });
 
 /**
- * Test that credentials file overlay mount works correctly.
- * This specifically tests the bug where resumed sessions lose credentials.
+ * Test that --userns=keep-id works correctly for rootless podman.
+ * This approach preserves file ownership between host and container.
  */
-describe.skipIf(!podmanAvailable)("Credentials overlay mount (integration)", () => {
+describe.skipIf(!podmanAvailable)("userns=keep-id integration", () => {
   const testImage = "docker.io/library/alpine:latest";
   let tempDir: string;
-  let credsFile: string;
   let sessionDir: string;
 
   beforeEach(async () => {
     // Create temp directories
-    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "creds-test-"));
-    credsFile = path.join(tempDir, "credentials.json");
+    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "userns-test-"));
     sessionDir = path.join(tempDir, "session-claude");
-
-    // Create a fake credentials file
-    await fs.writeFile(credsFile, JSON.stringify({ token: "test-oauth-token-12345" }));
-
-    // Create session .claude directory
     await fs.mkdir(sessionDir, { recursive: true });
+
+    // Create a test file with credentials
+    await fs.writeFile(
+      path.join(sessionDir, "credentials.json"),
+      JSON.stringify({ token: "test-token-12345" })
+    );
   });
 
   afterEach(async () => {
-    // Clean up
     try {
       await fs.rm(tempDir, { recursive: true, force: true });
     } catch {
@@ -204,167 +202,113 @@ describe.skipIf(!podmanAvailable)("Credentials overlay mount (integration)", () 
     }
   });
 
-  it("credentials file is accessible with overlay mount", async () => {
-    // Run container with directory mount + file overlay mount (like the plugin does)
-    const result = await new Promise<{ stdout: string; exitCode: number }>((resolve, reject) => {
+  it("files created inside container are owned by host user with --userns=keep-id", async () => {
+    // Run container with --userns=keep-id and create a file
+    const result = await new Promise<{ exitCode: number }>((resolve, reject) => {
       const proc = spawn("podman", [
         "run",
         "--rm",
+        "--userns=keep-id",
         "-v",
-        `${sessionDir}:/home/test/.config:U`,
-        "-v",
-        `${credsFile}:/home/test/.config/credentials.json:ro`,
+        `${sessionDir}:/home/test/.config:rw`,
         testImage,
-        "cat",
-        "/home/test/.config/credentials.json",
+        "sh",
+        "-c",
+        "echo 'created by container' > /home/test/.config/new-file.txt",
       ]);
-
-      let stdout = "";
-      let stderr = "";
-      proc.stdout.on("data", (data: Buffer) => {
-        stdout += data.toString();
-      });
-      proc.stderr.on("data", (data: Buffer) => {
-        stderr += data.toString();
-      });
 
       proc.on("error", reject);
       proc.on("close", (code: number) => {
-        if (code !== 0) {
-          console.error("First run stderr:", stderr);
-        }
-        resolve({ stdout: stdout.trim(), exitCode: code });
+        resolve({ exitCode: code });
       });
     });
 
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("test-oauth-token-12345");
+
+    // Verify the file was created and is owned by host user (not 100999)
+    const stat = await fs.stat(path.join(sessionDir, "new-file.txt"));
+    expect(stat.uid).toBe(process.getuid?.() ?? 0);
   });
 
-  it("credentials remain accessible after session directory is modified", async () => {
-    // First run - this will change ownership of sessionDir due to :U flag
-    const firstRun = await new Promise<{ exitCode: number }>((resolve, reject) => {
+  it("credentials file remains accessible across multiple container runs", async () => {
+    // First run - read and modify session dir
+    const firstRun = await new Promise<{ stdout: string; exitCode: number }>((resolve, reject) => {
       const proc = spawn("podman", [
         "run",
         "--rm",
+        "--userns=keep-id",
         "-v",
-        `${sessionDir}:/home/test/.config:U`,
-        "-v",
-        `${credsFile}:/home/test/.config/credentials.json:ro`,
+        `${sessionDir}:/home/test/.config:rw`,
         testImage,
         "sh",
         "-c",
-        // Write something to the config dir (like Claude Code would do)
-        "echo 'session data' > /home/test/.config/session.txt && cat /home/test/.config/credentials.json",
+        "cat /home/test/.config/credentials.json && echo 'session1' > /home/test/.config/session.txt",
       ]);
+
+      let stdout = "";
+      proc.stdout.on("data", (data: Buffer) => {
+        stdout += data.toString();
+      });
 
       proc.on("error", reject);
       proc.on("close", (code: number) => {
-        resolve({ exitCode: code });
+        resolve({ stdout: stdout.trim(), exitCode: code });
       });
     });
 
     expect(firstRun.exitCode).toBe(0);
+    expect(firstRun.stdout).toContain("test-token-12345");
 
-    // Second run - simulates resumed session
+    // Second run - verify credentials still accessible
     const secondRun = await new Promise<{ stdout: string; exitCode: number }>((resolve, reject) => {
       const proc = spawn("podman", [
         "run",
         "--rm",
+        "--userns=keep-id",
         "-v",
-        `${sessionDir}:/home/test/.config:U`,
-        "-v",
-        `${credsFile}:/home/test/.config/credentials.json:ro`,
+        `${sessionDir}:/home/test/.config:rw`,
         testImage,
         "cat",
         "/home/test/.config/credentials.json",
       ]);
 
       let stdout = "";
-      let stderr = "";
       proc.stdout.on("data", (data: Buffer) => {
         stdout += data.toString();
-      });
-      proc.stderr.on("data", (data: Buffer) => {
-        stderr += data.toString();
       });
 
       proc.on("error", reject);
       proc.on("close", (code: number) => {
-        if (code !== 0) {
-          console.error("Second run stderr:", stderr);
-        }
         resolve({ stdout: stdout.trim(), exitCode: code });
       });
     });
 
     expect(secondRun.exitCode).toBe(0);
-    expect(secondRun.stdout).toContain("test-oauth-token-12345");
+    expect(secondRun.stdout).toContain("test-token-12345");
   });
 
-  it("credentials accessible even when session creates same filename", async () => {
-    // First run - create a credentials.json file in the session dir
-    const firstRun = await new Promise<{ exitCode: number }>((resolve, reject) => {
+  it("host can still write to session directory after container run", async () => {
+    // Run container that creates files
+    await new Promise<void>((resolve, reject) => {
       const proc = spawn("podman", [
         "run",
         "--rm",
+        "--userns=keep-id",
         "-v",
-        `${sessionDir}:/home/test/.config:U`,
-        // Note: no credentials overlay on first run
+        `${sessionDir}:/home/test/.config:rw`,
         testImage,
         "sh",
         "-c",
-        // Create a fake credentials file in the session dir
-        'echo \'{"token": "wrong-token"}\' > /home/test/.config/credentials.json',
+        "echo 'container data' > /home/test/.config/container-file.txt",
       ]);
 
       proc.on("error", reject);
-      proc.on("close", (code: number) => {
-        resolve({ exitCode: code });
-      });
+      proc.on("close", () => resolve());
     });
 
-    expect(firstRun.exitCode).toBe(0);
-
-    // Note: The first run created a credentials.json in the session dir.
-    // This might not be visible to host due to :U ownership change.
-    // We're testing that the overlay mount takes precedence in the container.
-
-    // Second run - with overlay mount, should see the HOST credentials
-    const secondRun = await new Promise<{ stdout: string; exitCode: number }>((resolve, reject) => {
-      const proc = spawn("podman", [
-        "run",
-        "--rm",
-        "-v",
-        `${sessionDir}:/home/test/.config:U`,
-        "-v",
-        `${credsFile}:/home/test/.config/credentials.json:ro`,
-        testImage,
-        "cat",
-        "/home/test/.config/credentials.json",
-      ]);
-
-      let stdout = "";
-      let stderr = "";
-      proc.stdout.on("data", (data: Buffer) => {
-        stdout += data.toString();
-      });
-      proc.stderr.on("data", (data: Buffer) => {
-        stderr += data.toString();
-      });
-
-      proc.on("error", reject);
-      proc.on("close", (code: number) => {
-        if (code !== 0) {
-          console.error("With overlay stderr:", stderr);
-        }
-        resolve({ stdout: stdout.trim(), exitCode: code });
-      });
-    });
-
-    expect(secondRun.exitCode).toBe(0);
-    // The overlay mount should take precedence over the session's file
-    expect(secondRun.stdout).toContain("test-oauth-token-12345");
-    expect(secondRun.stdout).not.toContain("wrong-token");
+    // Verify host can still write to the directory
+    await fs.writeFile(path.join(sessionDir, "host-file.txt"), "host data");
+    const content = await fs.readFile(path.join(sessionDir, "host-file.txt"), "utf-8");
+    expect(content).toBe("host data");
   });
 });

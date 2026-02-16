@@ -241,6 +241,7 @@ export class PodmanRunner {
 
   /**
    * Start a container in detached mode. Returns immediately with container ID.
+   * Credentials should be copied to claudeDir before calling this method.
    */
   async startDetached(params: {
     sessionKey: string;
@@ -249,7 +250,6 @@ export class PodmanRunner {
     workspaceDir: string;
     resumeSessionId?: string;
     apiKey?: string;
-    hostCredsPath?: string;
   }): Promise<DetachedStartResult> {
     const containerName = `claude-${params.sessionKey.replace(/[^a-zA-Z0-9-]/g, "-")}`;
 
@@ -266,6 +266,7 @@ export class PodmanRunner {
       "--detach",
       "--name",
       containerName,
+      "--userns=keep-id",
       "--network",
       this.config.network,
       "--cap-drop",
@@ -286,19 +287,10 @@ export class PodmanRunner {
       "--tmpfs",
       "/tmp:rw,noexec,nosuid,size=64m",
       "-v",
-      `${params.claudeDir}:/home/claude/.claude:U`,
+      `${params.claudeDir}:/home/claude/.claude:rw`,
       "-v",
-      `${params.workspaceDir}:/workspace:U`
+      `${params.workspaceDir}:/workspace:rw`
     );
-
-    // Mount host credentials file as read-only overlay (after .claude dir mount)
-    if (params.hostCredsPath) {
-      const credsMount = `${params.hostCredsPath}:/home/claude/.claude/.credentials.json:ro`;
-      console.error(`[podman-runner] Adding credentials mount: ${credsMount}`);
-      args.push("-v", credsMount);
-    } else {
-      console.error("[podman-runner] No hostCredsPath provided, skipping credentials mount");
-    }
 
     if (params.apiKey) {
       args.push("-e", `ANTHROPIC_API_KEY=${params.apiKey}`);

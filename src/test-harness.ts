@@ -10,6 +10,7 @@
 import { PodmanRunner } from "./podman-runner.js";
 import { SessionManager } from "./session-manager.js";
 import { execSync } from "node:child_process";
+import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { homedir } from "node:os";
 
@@ -88,7 +89,13 @@ async function main(): Promise<void> {
   console.log("Workspace dir:", workspaceDir);
   console.log("");
 
-  // Credentials are now mounted read-only from host, no need to copy
+  // Copy credentials to session directory (with --userns=keep-id, we can write to the dir)
+  if (credentials) {
+    const hostCredsPath = path.join(homedir(), ".claude", ".credentials.json");
+    const sessionCredsPath = path.join(claudeDir, ".credentials.json");
+    console.log(`Copying credentials from ${hostCredsPath} to ${sessionCredsPath}`);
+    await fs.copyFile(hostCredsPath, sessionCredsPath);
+  }
 
   // Run Claude Code (async)
   const prompt = "Say 'Hello from test harness!' and nothing else";
@@ -107,7 +114,6 @@ async function main(): Promise<void> {
       workspaceDir,
       resumeSessionId: session.claudeSessionId ?? undefined,
       apiKey: credentials ? undefined : process.env.ANTHROPIC_API_KEY,
-      hostCredsPath: credentials ? path.join(homedir(), ".claude", ".credentials.json") : undefined,
     });
     console.log("✓ Container started:", containerName);
 

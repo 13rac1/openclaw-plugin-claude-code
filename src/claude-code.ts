@@ -120,11 +120,11 @@ export default function register(api: PluginApi): void {
     try {
       await fs.access(hostCredsPath);
       hasCredsFile = true;
-      console.error(`[claude-code] Found credentials file: ${hostCredsPath}`);
+      console.log(`[claude-code] Found credentials file: ${hostCredsPath}`);
     } catch (err) {
       // No credentials file
       const errMsg = err instanceof Error ? err.message : "unknown error";
-      console.error(`[claude-code] No credentials file at ${hostCredsPath}: ${errMsg}`);
+      console.log(`[claude-code] No credentials file at ${hostCredsPath}: ${errMsg}`);
     }
 
     const apiKey = hasCredsFile ? undefined : process.env.ANTHROPIC_API_KEY;
@@ -135,7 +135,7 @@ export default function register(api: PluginApi): void {
       );
     }
 
-    console.error(
+    console.log(
       `[claude-code] Auth: hasCredsFile=${String(hasCredsFile)}, hasApiKey=${String(!!apiKey)}`
     );
     return { apiKey, hasCredsFile };
@@ -192,11 +192,18 @@ export default function register(api: PluginApi): void {
       // Get paths for volume mounts
       const claudeDir = `${config.sessionsDir.replace("~", process.env.HOME ?? "")}/${sessionKey}/.claude`;
       const workspaceDir = sessionManager.workspaceDir(sessionKey);
-      const hostCredsPath = hasCredsFile ? getHostCredsPath() : undefined;
 
-      console.error(
-        `[claude-code] Volume mounts: claudeDir=${claudeDir}, hostCredsPath=${hostCredsPath ?? "none"}`
-      );
+      // Copy credentials to session directory (with --userns=keep-id, we can write to the dir)
+      if (hasCredsFile) {
+        const hostCredsPath = getHostCredsPath();
+        const sessionCredsPath = path.join(claudeDir, ".credentials.json");
+        console.log(
+          `[claude-code] Copying credentials from ${hostCredsPath} to ${sessionCredsPath}`
+        );
+        await fs.copyFile(hostCredsPath, sessionCredsPath);
+      }
+
+      console.log(`[claude-code] Volume mounts: claudeDir=${claudeDir}`);
 
       // Create job record
       const containerName = podmanRunner.containerNameFromSessionKey(sessionKey);
@@ -211,7 +218,6 @@ export default function register(api: PluginApi): void {
           workspaceDir,
           resumeSessionId: session.claudeSessionId ?? undefined,
           apiKey,
-          hostCredsPath,
         });
 
         // Update job status to running
