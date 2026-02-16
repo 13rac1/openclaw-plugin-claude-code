@@ -455,6 +455,95 @@ describe("PodmanRunner", () => {
 
       vi.useFakeTimers();
     });
+
+    it("mounts credentials file as read-only when hostCredsPath provided", async () => {
+      vi.useRealTimers();
+
+      const mockKillProc = createMockProcess();
+      const mockRmProc = createMockProcess();
+      const mockRunProc = createMockProcess();
+
+      mockSpawn
+        .mockReturnValueOnce(mockKillProc)
+        .mockReturnValueOnce(mockRmProc)
+        .mockReturnValueOnce(mockRunProc);
+
+      const promise = runner.startDetached({
+        sessionKey: "creds-test",
+        prompt: "test with creds",
+        claudeDir: "/path/.claude",
+        workspaceDir: "/path/workspace",
+        hostCredsPath: "/home/user/.claude/.credentials.json",
+      });
+
+      mockKillProc.emit("close", 0);
+      await new Promise((r) => setImmediate(r));
+      mockRmProc.emit("close", 0);
+      await new Promise((r) => setImmediate(r));
+
+      (mockRunProc.stdout as EventEmitter).emit("data", Buffer.from("container-id\n"));
+      mockRunProc.emit("close", 0);
+
+      await promise;
+
+      // Verify the credentials mount was added
+      const runCall = mockSpawn.mock.calls[2];
+      const args = runCall[1] as string[];
+
+      // Find the credentials mount
+      const credsMount = args.find(
+        (arg) => arg.includes(".credentials.json") && arg.includes(":ro")
+      );
+      expect(credsMount).toBeDefined();
+      expect(credsMount).toBe(
+        "/home/user/.claude/.credentials.json:/home/claude/.claude/.credentials.json:ro"
+      );
+
+      vi.useFakeTimers();
+    });
+
+    it("does not mount credentials when hostCredsPath not provided", async () => {
+      vi.useRealTimers();
+
+      const mockKillProc = createMockProcess();
+      const mockRmProc = createMockProcess();
+      const mockRunProc = createMockProcess();
+
+      mockSpawn
+        .mockReturnValueOnce(mockKillProc)
+        .mockReturnValueOnce(mockRmProc)
+        .mockReturnValueOnce(mockRunProc);
+
+      const promise = runner.startDetached({
+        sessionKey: "no-creds-test",
+        prompt: "test without creds",
+        claudeDir: "/path/.claude",
+        workspaceDir: "/path/workspace",
+        apiKey: "sk-test-key",
+        // Note: no hostCredsPath
+      });
+
+      mockKillProc.emit("close", 0);
+      await new Promise((r) => setImmediate(r));
+      mockRmProc.emit("close", 0);
+      await new Promise((r) => setImmediate(r));
+
+      (mockRunProc.stdout as EventEmitter).emit("data", Buffer.from("container-id\n"));
+      mockRunProc.emit("close", 0);
+
+      await promise;
+
+      // Verify no credentials mount was added
+      const runCall = mockSpawn.mock.calls[2];
+      const args = runCall[1] as string[];
+
+      const credsMount = args.find(
+        (arg) => arg.includes(".credentials.json") && arg.includes(":ro")
+      );
+      expect(credsMount).toBeUndefined();
+
+      vi.useFakeTimers();
+    });
   });
 
   describe("getContainerStatus", () => {

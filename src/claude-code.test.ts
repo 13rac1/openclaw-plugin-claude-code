@@ -303,6 +303,129 @@ describe("register", () => {
       expect(parsed.status).toBe("running");
       expect(mockPodmanRunner.startDetached).toHaveBeenCalled();
     });
+
+    it("starts job with OAuth credentials when credentials file exists", async () => {
+      // Mock credentials file exists
+      vi.mocked(fs.access).mockResolvedValue(undefined);
+      delete process.env.ANTHROPIC_API_KEY;
+
+      mockPodmanRunner.checkImage.mockResolvedValue(true);
+      mockSessionManager.getOrCreateSession.mockResolvedValue({
+        sessionKey: "oauth-test",
+        claudeSessionId: null,
+      });
+      mockSessionManager.getActiveJob.mockResolvedValue(null);
+      mockSessionManager.workspaceDir.mockReturnValue("/tmp/workspace");
+      mockSessionManager.createJob.mockResolvedValue({
+        jobId: "oauth-job",
+        sessionKey: "oauth-test",
+        status: "pending",
+      });
+      mockPodmanRunner.startDetached.mockResolvedValue({
+        containerName: "claude-oauth-test",
+        containerId: "def456",
+      });
+      mockSessionManager.updateJob.mockResolvedValue({});
+      mockSessionManager.setActiveJob.mockResolvedValue({});
+
+      register(mockApi);
+
+      const toolConfig = mockApi.registerTool.mock.calls.find(
+        (call: unknown[]) => (call[0] as { name: string }).name === "claude_code_start"
+      )?.[0] as {
+        execute: (
+          id: string,
+          params: Record<string, unknown>
+        ) => Promise<{ content: { type: string; text: string }[] }>;
+      };
+
+      await toolConfig.execute("test-id", { prompt: "hello" });
+
+      // Verify hostCredsPath was passed to startDetached
+      expect(mockPodmanRunner.startDetached).toHaveBeenCalledWith(
+        expect.objectContaining({
+          hostCredsPath: expect.stringContaining(".credentials.json"),
+        })
+      );
+      // Verify apiKey was NOT passed (since we're using OAuth)
+      expect(mockPodmanRunner.startDetached).toHaveBeenCalledWith(
+        expect.objectContaining({
+          apiKey: undefined,
+        })
+      );
+    });
+
+    it("passes OAuth credentials on both first and resumed session jobs", async () => {
+      // Mock credentials file exists
+      vi.mocked(fs.access).mockResolvedValue(undefined);
+      delete process.env.ANTHROPIC_API_KEY;
+
+      mockPodmanRunner.checkImage.mockResolvedValue(true);
+      mockSessionManager.workspaceDir.mockReturnValue("/tmp/workspace");
+      mockPodmanRunner.startDetached.mockResolvedValue({
+        containerName: "claude-resume-test",
+        containerId: "ghi789",
+      });
+      mockSessionManager.updateJob.mockResolvedValue({});
+      mockSessionManager.setActiveJob.mockResolvedValue({});
+
+      register(mockApi);
+
+      const toolConfig = mockApi.registerTool.mock.calls.find(
+        (call: unknown[]) => (call[0] as { name: string }).name === "claude_code_start"
+      )?.[0] as {
+        execute: (
+          id: string,
+          params: Record<string, unknown>
+        ) => Promise<{ content: { type: string; text: string }[] }>;
+      };
+
+      // First job - new session
+      mockSessionManager.getOrCreateSession.mockResolvedValue({
+        sessionKey: "resume-test",
+        claudeSessionId: null,
+      });
+      mockSessionManager.getActiveJob.mockResolvedValue(null);
+      mockSessionManager.createJob.mockResolvedValue({
+        jobId: "job-1",
+        sessionKey: "resume-test",
+        status: "pending",
+      });
+
+      await toolConfig.execute("first-job", { prompt: "first task", session_id: "resume-test" });
+
+      expect(mockPodmanRunner.startDetached).toHaveBeenCalledWith(
+        expect.objectContaining({
+          hostCredsPath: expect.stringContaining(".credentials.json"),
+          resumeSessionId: undefined, // First job, no claude session yet
+        })
+      );
+
+      // Clear for second job
+      vi.mocked(mockPodmanRunner.startDetached).mockClear();
+
+      // Second job - resumed session (now has claudeSessionId)
+      mockSessionManager.getOrCreateSession.mockResolvedValue({
+        sessionKey: "resume-test",
+        claudeSessionId: "claude-session-abc123", // Has session from first job
+      });
+      mockSessionManager.getActiveJob.mockResolvedValue(null); // Previous job completed
+      mockSessionManager.createJob.mockResolvedValue({
+        jobId: "job-2",
+        sessionKey: "resume-test",
+        status: "pending",
+      });
+
+      await toolConfig.execute("second-job", { prompt: "second task", session_id: "resume-test" });
+
+      // Verify credentials are STILL passed on resumed session
+      expect(mockPodmanRunner.startDetached).toHaveBeenCalledWith(
+        expect.objectContaining({
+          hostCredsPath: expect.stringContaining(".credentials.json"),
+          resumeSessionId: "claude-session-abc123", // Should have session ID this time
+        })
+      );
+    });
   });
 
   describe("claude_code_status tool execute", () => {
