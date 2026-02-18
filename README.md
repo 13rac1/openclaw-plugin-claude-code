@@ -39,6 +39,7 @@ Any OpenClaw agent can use the `claude_code_start` tool to offload coding tasks.
 ## Features
 
 - **Isolated Execution**: Each Claude Code session runs in its own container with dropped capabilities
+- **Real-time Streaming**: Output is captured as it's generated using Claude Code's stream-json format
 - **Session Persistence**: Sessions maintain state across multiple interactions
 - **Dual Authentication**: Supports both API key and OAuth/Claude Max credentials
 - **Resource Limits**: Configurable memory, CPU, and PID limits

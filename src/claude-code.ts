@@ -232,7 +232,9 @@ export default function register(api: PluginApi): void {
           }
         }
 
-        console.log(`[claude-code] Container ${containerName} exited with code ${String(exitCode)}`);
+        console.log(
+          `[claude-code] Container ${containerName} exited with code ${String(exitCode)}`
+        );
 
         // Get job to calculate elapsed time
         const job = await sessionManager.getJob(sessionKey, jobId);

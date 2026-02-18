@@ -98,10 +98,7 @@ describe("extractTextFromStream", () => {
   });
 
   it("returns empty string when no text events found", () => {
-    const lines = [
-      '{"event":{"type":"content_block_stop"}}',
-      '{"event":{"type":"message_stop"}}',
-    ];
+    const lines = ['{"event":{"type":"content_block_stop"}}', '{"event":{"type":"message_stop"}}'];
 
     const result = extractTextFromStream(lines);
     expect(result).toBe("");
