@@ -1,9 +1,11 @@
 import { Type } from "@sinclair/typebox";
 import * as fs from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import * as path from "node:path";
 import { homedir } from "node:os";
 import { SessionManager } from "./session-manager.js";
 import { PodmanRunner } from "./podman-runner.js";
+import { notifyJobCompletion, type JobCompletionEvent } from "./notification.js";
 
 /**
  * Plugin configuration interface
@@ -21,6 +23,8 @@ export interface ClaudeCodePluginConfig {
   sessionIdleTimeout: number; // Seconds before cleaning up inactive sessions
   apparmorProfile?: string; // AppArmor profile name (empty = disabled)
   maxOutputSize: number; // Maximum output size in bytes (0 = unlimited)
+  notifyWebhookUrl: string; // OpenClaw webhook URL (default: http://localhost:18789/hooks/agent)
+  hooksToken: string; // Webhook authentication token (from OpenClaw hooks.token)
 }
 
 /**
@@ -39,6 +43,8 @@ const DEFAULT_CONFIG: ClaudeCodePluginConfig = {
   sessionIdleTimeout: 3600, // Clean up sessions after 1hr idle
   apparmorProfile: "", // Disabled by default
   maxOutputSize: 10 * 1024 * 1024, // 10MB default
+  notifyWebhookUrl: "http://localhost:18789/hooks/agent",
+  hooksToken: "", // Must be set to enable notifications
 };
 
 /** Tool response content item */
@@ -146,6 +152,112 @@ export default function register(api: PluginApi): void {
     return path.join(homedir(), ".claude", ".credentials.json");
   }
 
+  // Get webhook token - try plugin config first, then read OpenClaw config file
+  function getWebhookToken(): string | undefined {
+    if (config.hooksToken) {
+      return config.hooksToken;
+    }
+
+    // Try to read from OpenClaw config file
+    try {
+      const configPath = path.join(homedir(), ".openclaw", "openclaw.json");
+      const configData = readFileSync(configPath, "utf-8");
+      const openclawConfig = JSON.parse(configData) as {
+        hooks?: { token?: string };
+      };
+      return openclawConfig.hooks?.token;
+    } catch {
+      return undefined;
+    }
+  }
+
+  // Send job completion notification if webhook token is available
+  async function sendCompletionNotification(event: JobCompletionEvent): Promise<void> {
+    const webhookToken = getWebhookToken();
+    if (!webhookToken) {
+      console.log("[claude-code] Notification skipped: no hooks.token in openclawConfig");
+      return;
+    }
+
+    try {
+      await notifyJobCompletion(
+        {
+          webhookUrl: config.notifyWebhookUrl,
+          webhookToken,
+        },
+        event
+      );
+      console.log(
+        `[claude-code] Posted job ${event.jobId} completion to ${config.notifyWebhookUrl}`
+      );
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : "unknown error";
+      console.log(`[claude-code] Notification failed: ${errMsg}`);
+    }
+  }
+
+  // Background watcher for job completion
+  function watchJobCompletion(sessionKey: string, jobId: string, containerName: string): void {
+    // Fire and forget - runs in background
+    void (async () => {
+      try {
+        console.log(`[claude-code] Watching job ${jobId} for completion`);
+
+        // Wait for container to exit
+        const exitCode = await podmanRunner.waitForContainer(containerName);
+        console.log(`[claude-code] Container ${containerName} exited with code ${String(exitCode)}`);
+
+        // Get final logs
+        const logs = await podmanRunner.getContainerLogs(containerName);
+        if (logs) {
+          await sessionManager.appendJobOutput(sessionKey, jobId, logs);
+        }
+
+        // Get job to calculate elapsed time
+        const job = await sessionManager.getJob(sessionKey, jobId);
+        if (job?.status !== "running") {
+          // Job already handled (cancelled, etc.)
+          return;
+        }
+
+        // Determine status
+        const status = exitCode === 0 ? "completed" : "failed";
+        const errorType = exitCode === 137 ? "oom" : exitCode !== 0 ? "crash" : null;
+
+        // Update job state
+        const updatedJob = await sessionManager.updateJob(sessionKey, jobId, {
+          status,
+          completedAt: new Date().toISOString(),
+          exitCode,
+          errorType,
+        });
+
+        // Clear active job
+        await sessionManager.setActiveJob(sessionKey, null);
+
+        // Calculate elapsed time
+        const startedAt = job.startedAt ? new Date(job.startedAt).getTime() : Date.now();
+        const elapsedSeconds = (Date.now() - startedAt) / 1000;
+
+        // Send notification
+        await sendCompletionNotification({
+          jobId,
+          sessionKey,
+          status,
+          elapsedSeconds,
+          outputSize: updatedJob.outputSize,
+          exitCode,
+          errorType,
+        });
+
+        console.log(`[claude-code] Job ${jobId} completed with status: ${status}`);
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : "unknown error";
+        console.log(`[claude-code] Job watcher error for ${jobId}: ${errMsg}`);
+      }
+    })();
+  }
+
   // Register claude_code_start tool
   api.registerTool({
     name: "claude_code_start",
@@ -229,6 +341,9 @@ export default function register(api: PluginApi): void {
         // Set as active job
         await sessionManager.setActiveJob(sessionKey, job.jobId);
 
+        // Start background watcher for job completion
+        watchJobCompletion(sessionKey, job.jobId, containerName);
+
         return {
           content: [
             {
@@ -263,7 +378,8 @@ export default function register(api: PluginApi): void {
   api.registerTool({
     name: "claude_code_status",
     description:
-      "Check the status of a Claude Code job. Returns status, elapsed time, output size, and metrics.",
+      "Check the status of a Claude Code job. Returns status, elapsed time, output size, metrics, " +
+      "plus tailOutput (last ~500 chars), lastOutputSecondsAgo, and activityState (active/processing/idle).",
     parameters: Type.Object({
       job_id: Type.String({ description: "The job ID to check" }),
       session_id: Type.Optional(
@@ -308,9 +424,10 @@ export default function register(api: PluginApi): void {
           }
 
           const status = containerStatus.exitCode === 0 ? "completed" : "failed";
+          const completedAt = containerStatus.finishedAt ?? new Date().toISOString();
           job = await sessionManager.updateJob(sessionKey, jobId, {
             status,
-            completedAt: containerStatus.finishedAt ?? new Date().toISOString(),
+            completedAt,
             exitCode: containerStatus.exitCode,
             errorType:
               containerStatus.exitCode === 137
@@ -347,18 +464,36 @@ export default function register(api: PluginApi): void {
       const endTime = job.completedAt ? new Date(job.completedAt).getTime() : Date.now();
       const elapsedSeconds = (endTime - startTime) / 1000;
 
-      // Get current output size
-      const outputResult = await sessionManager.readJobOutput(sessionKey, jobId, {
-        offset: 0,
-        limit: 0,
-      });
+      // Get output tail and last modified time
+      const tailResult = await sessionManager.readJobOutputTail(sessionKey, jobId, 500);
+
+      // Determine activity state based on output recency and resource usage
+      let activityState: "active" | "processing" | "idle" = "idle";
+      if (job.status === "running") {
+        const lastOutputSecondsAgo = tailResult.lastModifiedSecondsAgo ?? Infinity;
+        const cpuPercent = job.metrics?.cpuPercent ?? 0;
+
+        if (lastOutputSecondsAgo < 10) {
+          activityState = "active"; // Actively producing output
+        } else if (cpuPercent > 20) {
+          activityState = "processing"; // Working but no output yet
+        } else {
+          activityState = "idle"; // May be stuck or waiting
+        }
+      }
 
       const response = {
         jobId: job.jobId,
         sessionKey,
         status: job.status,
         elapsedSeconds: Math.round(elapsedSeconds * 10) / 10,
-        outputSize: outputResult.totalSize,
+        outputSize: tailResult.totalSize,
+        lastOutputSecondsAgo:
+          tailResult.lastModifiedSecondsAgo !== null
+            ? Math.round(tailResult.lastModifiedSecondsAgo)
+            : null,
+        activityState,
+        tailOutput: tailResult.tail,
         exitCode: job.exitCode,
         error: job.errorMessage,
         metrics: job.metrics,
@@ -474,9 +609,25 @@ export default function register(api: PluginApi): void {
       await podmanRunner.killContainer(sessionKey);
 
       // Update job status
-      await sessionManager.updateJob(sessionKey, jobId, {
+      const completedAt = new Date().toISOString();
+      const updatedJob = await sessionManager.updateJob(sessionKey, jobId, {
         status: "cancelled",
-        completedAt: new Date().toISOString(),
+        completedAt,
+      });
+
+      // Send cancellation notification
+      const startTime = job.startedAt
+        ? new Date(job.startedAt).getTime()
+        : new Date(job.createdAt).getTime();
+      const elapsedSeconds = (new Date(completedAt).getTime() - startTime) / 1000;
+      await sendCompletionNotification({
+        jobId,
+        sessionKey,
+        status: "cancelled",
+        elapsedSeconds,
+        outputSize: updatedJob.outputSize,
+        exitCode: null,
+        errorType: null,
       });
 
       // Clear active job
@@ -588,6 +739,7 @@ async function recoverOrphanedJobs(
         // Job exists for this container
         if (!container.running) {
           // Container finished while plugin was down - update job
+          // Note: No notification sent for recovered jobs (user wasn't actively waiting)
           const status = await podmanRunner.getContainerStatus(container.name);
           const logs = await podmanRunner.getContainerLogs(container.name);
 

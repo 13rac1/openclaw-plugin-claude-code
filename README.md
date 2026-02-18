@@ -133,6 +133,8 @@ Add to your `openclaw.json`:
 | `sessionIdleTimeout` | number | `3600` | Cleanup idle sessions after this many seconds |
 | `apparmorProfile` | string | `""` | AppArmor profile name (empty = disabled) |
 | `maxOutputSize` | number | `10485760` | Maximum output size in bytes (10MB default, 0 = unlimited) |
+| `notifyWebhookUrl` | string | `http://localhost:18789/hooks/agent` | OpenClaw webhook URL for notifications |
+| `hooksToken` | string | `""` | Webhook auth token (must match OpenClaw `hooks.token` to enable notifications) |
 
 ## Authentication
 
@@ -158,6 +160,24 @@ export ANTHROPIC_API_KEY=sk-ant-...
 
 **Note**: If both are available, OAuth credentials take precedence.
 
+## Job Completion Notifications
+
+The plugin sends webhook notifications when jobs complete. No polling required.
+
+### Setup
+
+Enable webhooks in OpenClaw config (`~/.openclaw/openclaw.json`):
+```json
+{
+  "hooks": {
+    "enabled": true,
+    "token": "your-secret-token"
+  }
+}
+```
+
+The plugin automatically reads the token from the OpenClaw config file. When a job completes, fails, or is cancelled, the agent receives a message with the job status, duration, and output size.
+
 ## Registered Tools
 
 ### `claude_code_start`
@@ -178,7 +198,16 @@ Check the status of a running or completed job.
 - `job_id` (required): Job ID returned from `claude_code_start`
 - `session_id` (optional): Session ID
 
-**Returns:** Status, elapsed time, output size, resource metrics, exit code, errors
+**Returns:**
+- `status`: Job status (pending, running, completed, failed, cancelled)
+- `elapsedSeconds`: Time since job started
+- `outputSize`: Total output size in bytes
+- `tailOutput`: Last ~500 chars of output (for quick preview)
+- `lastOutputSecondsAgo`: Seconds since last output was produced
+- `activityState`: "active" (producing output), "processing" (CPU busy), or "idle"
+- `metrics`: CPU and memory usage
+- `exitCode`: Process exit code (when completed)
+- `error`: Error message (if failed)
 
 ### `claude_code_output`
 

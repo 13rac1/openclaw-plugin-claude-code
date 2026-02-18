@@ -117,14 +117,48 @@ async function main(): Promise<void> {
     });
     console.log("✓ Container started:", containerName);
 
-    // Poll for completion
+    // Create a job to track output
+    const job = await sessionManager.createJob(sessionKey, { containerName, prompt });
+    console.log("✓ Job created:", job.jobId);
+
+    // Poll for completion with enhanced status
     let status = await podmanRunner.getContainerStatus(containerName);
+    let pollCount = 0;
     while (status?.running) {
-      process.stdout.write(".");
-      await new Promise((r) => setTimeout(r, 1000));
+      pollCount++;
+
+      // Get logs and append to job output
+      const logs = await podmanRunner.getContainerLogs(containerName);
+      if (logs) {
+        await sessionManager.appendJobOutput(sessionKey, job.jobId, logs);
+      }
+
+      // Get enhanced status info
+      const tailResult = await sessionManager.readJobOutputTail(sessionKey, job.jobId, 100);
+      const metrics = await podmanRunner.getContainerStats(containerName);
+
+      // Determine activity state
+      const lastOutputSecondsAgo = tailResult.lastModifiedSecondsAgo ?? Infinity;
+      const cpuPercent = metrics?.cpuPercent ?? 0;
+      let activityState = "idle";
+      if (lastOutputSecondsAgo < 10) {
+        activityState = "active";
+      } else if (cpuPercent > 20) {
+        activityState = "processing";
+      }
+
+      console.log(
+        `[poll ${String(pollCount)}] activity=${activityState}, lastOutput=${String(Math.round(lastOutputSecondsAgo))}s ago, ` +
+          `output=${String(tailResult.totalSize)} bytes, cpu=${String(Math.round(cpuPercent))}%`
+      );
+      if (tailResult.tail) {
+        console.log(`  tail: "${tailResult.tail.slice(0, 50).replace(/\n/g, "\\n")}..."`);
+      }
+
+      await new Promise((r) => setTimeout(r, 2000));
       status = await podmanRunner.getContainerStatus(containerName);
     }
-    console.log(" done");
+    console.log("Container finished");
 
     // Get output
     const output = await podmanRunner.getContainerLogs(containerName);

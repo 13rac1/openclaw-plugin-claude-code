@@ -916,4 +916,198 @@ describe("SessionManager", () => {
       );
     });
   });
+
+  describe("readJobOutputTail", () => {
+    it("reads last N bytes from output file", async () => {
+      const job = {
+        jobId: "job-123",
+        sessionKey: "test",
+        containerName: "claude-test",
+        status: "running",
+        prompt: "test",
+        createdAt: "2024-01-15T10:00:00.000Z",
+        startedAt: null,
+        completedAt: null,
+        exitCode: null,
+        errorType: null,
+        errorMessage: null,
+        outputFile: "/var/openclaw/sessions/test/jobs/job-123.log",
+        outputSize: 1000,
+        outputTruncated: false,
+        metrics: null,
+      };
+
+      const mockHandle = {
+        read: vi.fn().mockResolvedValue({ bytesRead: 100 }),
+        close: vi.fn().mockResolvedValue(undefined),
+      };
+
+      mockFs.readFile.mockResolvedValue(JSON.stringify(job));
+      mockFs.stat.mockResolvedValue({
+        size: 1000,
+        mtimeMs: Date.now() - 5000, // 5 seconds ago
+      } as any);
+      mockFs.open.mockResolvedValue(mockHandle as any);
+
+      const result = await manager.readJobOutputTail("test", "job-123", 100);
+
+      expect(result.totalSize).toBe(1000);
+      expect(result.lastModifiedSecondsAgo).toBeGreaterThanOrEqual(4);
+      expect(result.lastModifiedSecondsAgo).toBeLessThan(7);
+      // Read should start at offset 900 (1000 - 100)
+      expect(mockHandle.read).toHaveBeenCalledWith(expect.any(Buffer), 0, 100, 900);
+    });
+
+    it("prepends ... when truncating from middle", async () => {
+      const job = {
+        jobId: "job-123",
+        sessionKey: "test",
+        containerName: "claude-test",
+        status: "running",
+        prompt: "test",
+        createdAt: "2024-01-15T10:00:00.000Z",
+        startedAt: null,
+        completedAt: null,
+        exitCode: null,
+        errorType: null,
+        errorMessage: null,
+        outputFile: "/var/openclaw/sessions/test/jobs/job-123.log",
+        outputSize: 1000,
+        outputTruncated: false,
+        metrics: null,
+      };
+
+      const mockHandle = {
+        read: vi.fn().mockImplementation((buffer: Buffer) => {
+          buffer.write("end of output");
+          return Promise.resolve({ bytesRead: 13 });
+        }),
+        close: vi.fn().mockResolvedValue(undefined),
+      };
+
+      mockFs.readFile.mockResolvedValue(JSON.stringify(job));
+      mockFs.stat.mockResolvedValue({
+        size: 1000,
+        mtimeMs: Date.now(),
+      } as any);
+      mockFs.open.mockResolvedValue(mockHandle as any);
+
+      const result = await manager.readJobOutputTail("test", "job-123", 100);
+
+      expect(result.tail).toBe("...end of output");
+    });
+
+    it("does not prepend ... when reading from start", async () => {
+      const job = {
+        jobId: "job-123",
+        sessionKey: "test",
+        containerName: "claude-test",
+        status: "running",
+        prompt: "test",
+        createdAt: "2024-01-15T10:00:00.000Z",
+        startedAt: null,
+        completedAt: null,
+        exitCode: null,
+        errorType: null,
+        errorMessage: null,
+        outputFile: "/var/openclaw/sessions/test/jobs/job-123.log",
+        outputSize: 50,
+        outputTruncated: false,
+        metrics: null,
+      };
+
+      const mockHandle = {
+        read: vi.fn().mockImplementation((buffer: Buffer) => {
+          buffer.write("short output");
+          return Promise.resolve({ bytesRead: 12 });
+        }),
+        close: vi.fn().mockResolvedValue(undefined),
+      };
+
+      mockFs.readFile.mockResolvedValue(JSON.stringify(job));
+      mockFs.stat.mockResolvedValue({
+        size: 50, // Less than tailBytes (500 default)
+        mtimeMs: Date.now(),
+      } as any);
+      mockFs.open.mockResolvedValue(mockHandle as any);
+
+      const result = await manager.readJobOutputTail("test", "job-123");
+
+      expect(result.tail).toBe("short output");
+      expect(result.tail).not.toContain("...");
+    });
+
+    it("returns empty tail for empty file", async () => {
+      const job = {
+        jobId: "job-123",
+        sessionKey: "test",
+        containerName: "claude-test",
+        status: "running",
+        prompt: "test",
+        createdAt: "2024-01-15T10:00:00.000Z",
+        startedAt: null,
+        completedAt: null,
+        exitCode: null,
+        errorType: null,
+        errorMessage: null,
+        outputFile: "/var/openclaw/sessions/test/jobs/job-123.log",
+        outputSize: 0,
+        outputTruncated: false,
+        metrics: null,
+      };
+
+      mockFs.readFile.mockResolvedValue(JSON.stringify(job));
+      mockFs.stat.mockResolvedValue({
+        size: 0,
+        mtimeMs: Date.now(),
+      } as any);
+
+      const result = await manager.readJobOutputTail("test", "job-123");
+
+      expect(result.tail).toBe("");
+      expect(result.totalSize).toBe(0);
+    });
+
+    it("returns null lastModifiedSecondsAgo when file does not exist", async () => {
+      const job = {
+        jobId: "job-123",
+        sessionKey: "test",
+        containerName: "claude-test",
+        status: "running",
+        prompt: "test",
+        createdAt: "2024-01-15T10:00:00.000Z",
+        startedAt: null,
+        completedAt: null,
+        exitCode: null,
+        errorType: null,
+        errorMessage: null,
+        outputFile: "/var/openclaw/sessions/test/jobs/job-123.log",
+        outputSize: 0,
+        outputTruncated: false,
+        metrics: null,
+      };
+
+      const error = new Error("ENOENT") as NodeJS.ErrnoException;
+      error.code = "ENOENT";
+
+      mockFs.readFile.mockResolvedValue(JSON.stringify(job));
+      mockFs.stat.mockRejectedValue(error);
+
+      const result = await manager.readJobOutputTail("test", "job-123");
+
+      expect(result.tail).toBe("");
+      expect(result.lastModifiedSecondsAgo).toBeNull();
+      expect(result.totalSize).toBe(0);
+    });
+
+    it("throws when job not found", async () => {
+      const error = new Error("ENOENT") as NodeJS.ErrnoException;
+      error.code = "ENOENT";
+      mockFs.readFile.mockRejectedValue(error);
+
+      await expect(manager.readJobOutputTail("test", "nonexistent")).rejects.toThrow(
+        "Job not found: nonexistent"
+      );
+    });
+  });
 });

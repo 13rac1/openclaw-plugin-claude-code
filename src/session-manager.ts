@@ -392,4 +392,51 @@ export class SessionManager {
     const stat = await fs.stat(job.outputFile);
     await this.updateJob(sessionKey, jobId, { outputSize: stat.size });
   }
+
+  /**
+   * Read the last N bytes from job output (tail).
+   * Also returns the time since last modification.
+   */
+  async readJobOutputTail(
+    sessionKey: string,
+    jobId: string,
+    tailBytes = 500
+  ): Promise<{ tail: string; lastModifiedSecondsAgo: number | null; totalSize: number }> {
+    const job = await this.getJob(sessionKey, jobId);
+    if (!job) {
+      throw new Error(`Job not found: ${jobId}`);
+    }
+
+    try {
+      const stat = await fs.stat(job.outputFile);
+      const totalSize = stat.size;
+      const lastModifiedSecondsAgo = (Date.now() - stat.mtimeMs) / 1000;
+
+      if (totalSize === 0) {
+        return { tail: "", lastModifiedSecondsAgo, totalSize };
+      }
+
+      const offset = Math.max(0, totalSize - tailBytes);
+      const handle = await fs.open(job.outputFile, "r");
+      try {
+        const buffer = Buffer.alloc(Math.min(tailBytes, totalSize));
+        const { bytesRead } = await handle.read(buffer, 0, buffer.length, offset);
+
+        let tail = buffer.toString("utf-8", 0, bytesRead);
+        // If we're not at the start, prefix with "..." to indicate truncation
+        if (offset > 0) {
+          tail = "..." + tail;
+        }
+
+        return { tail, lastModifiedSecondsAgo, totalSize };
+      } finally {
+        await handle.close();
+      }
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        return { tail: "", lastModifiedSecondsAgo: null, totalSize: 0 };
+      }
+      throw err;
+    }
+  }
 }

@@ -127,6 +127,35 @@ export class PodmanRunner {
     });
   }
 
+  /**
+   * Wait for a container to exit. Returns the exit code.
+   * This blocks until the container stops.
+   */
+  async waitForContainer(containerName: string): Promise<number> {
+    return new Promise((resolve) => {
+      const proc = spawn(this.config.runtime, ["wait", containerName], {
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+
+      let output = "";
+      proc.stdout.on("data", (data: Buffer) => {
+        output += data.toString();
+      });
+
+      proc.on("close", (code) => {
+        if (code === 0) {
+          const exitCode = parseInt(output.trim(), 10);
+          resolve(isNaN(exitCode) ? 1 : exitCode);
+        } else {
+          // Container doesn't exist or error - treat as exit code 1
+          resolve(1);
+        }
+      });
+
+      proc.on("error", () => resolve(1));
+    });
+  }
+
   async verifyContainerRunning(containerName: string, retries = 3): Promise<boolean> {
     for (let i = 0; i < retries; i++) {
       await new Promise((r) => setTimeout(r, 500));

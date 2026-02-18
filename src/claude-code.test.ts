@@ -57,6 +57,7 @@ describe("register", () => {
     setActiveJob: Mock;
     getJob: Mock;
     readJobOutput: Mock;
+    readJobOutputTail: Mock;
     appendJobOutput: Mock;
   };
   let mockPodmanRunner: {
@@ -69,6 +70,7 @@ describe("register", () => {
     killContainer: Mock;
     listContainersByPrefix: Mock;
     sessionKeyFromContainerName: Mock;
+    waitForContainer: Mock;
   };
 
   beforeEach(() => {
@@ -86,6 +88,7 @@ describe("register", () => {
       setActiveJob: vi.fn(),
       getJob: vi.fn(),
       readJobOutput: vi.fn(),
+      readJobOutputTail: vi.fn(),
       appendJobOutput: vi.fn(),
     };
 
@@ -99,6 +102,7 @@ describe("register", () => {
       killContainer: vi.fn(),
       listContainersByPrefix: vi.fn().mockResolvedValue([]),
       sessionKeyFromContainerName: vi.fn(),
+      waitForContainer: vi.fn().mockResolvedValue(0),
     };
 
     vi.mocked(sessionManagerModule.SessionManager).mockImplementation(
@@ -471,13 +475,12 @@ describe("register", () => {
         completedAt: new Date().toISOString(),
         exitCode: 0,
         errorMessage: null,
-        metrics: { memoryUsageMB: 256 },
+        metrics: { memoryUsageMB: 256, cpuPercent: 10 },
       });
-      mockSessionManager.readJobOutput.mockResolvedValue({
-        content: "",
-        size: 0,
+      mockSessionManager.readJobOutputTail.mockResolvedValue({
+        tail: "job output here",
+        lastModifiedSecondsAgo: 5,
         totalSize: 1024,
-        hasMore: false,
       });
 
       register(mockApi);
