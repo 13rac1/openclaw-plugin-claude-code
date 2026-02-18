@@ -179,6 +179,29 @@ Enable webhooks in OpenClaw config (`~/.openclaw/openclaw.json`):
 
 The plugin automatically reads the token from the OpenClaw config file. When a job completes, fails, or is cancelled, the agent receives a message with the job status, duration, and output size.
 
+### Sandbox Tool Allowlist
+
+If you use OpenClaw's sandbox mode (`sandbox.mode: "non-main"` or `"all"`), webhook-triggered agents run in a sandboxed context with restricted tool access. To allow the agent to use this plugin's tools, add them to your sandbox tool allowlist in `~/.openclaw/openclaw.json`:
+
+```json
+{
+  "tools": {
+    "sandbox": {
+      "tools": {
+        "allow": [
+          "exec", "process", "read", "write", "edit", "apply_patch", "image",
+          "sessions_list", "sessions_history", "sessions_send", "sessions_spawn", "session_status",
+          "claude_code_start", "claude_code_status", "claude_code_output",
+          "claude_code_cancel", "claude_code_cleanup", "claude_code_sessions"
+        ]
+      }
+    }
+  }
+}
+```
+
+See [Multi-Agent Sandbox & Tools](https://docs.openclaw.ai/tools/multi-agent-sandbox-tools) for more details on sandbox tool policies.
+
 ## Registered Tools
 
 ### `claude_code_start`
