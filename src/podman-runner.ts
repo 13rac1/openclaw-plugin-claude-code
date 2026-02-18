@@ -288,7 +288,7 @@ export class PodmanRunner {
     // Build the claude command
     const resumeFlag = params.resumeSessionId ? `--resume '${params.resumeSessionId}'` : "";
     const escapedPrompt = params.prompt.replace(/'/g, "'\\''");
-    const claudeCmd = `claude --print --dangerously-skip-permissions ${resumeFlag} -p '${escapedPrompt}' < /dev/null 2>&1`;
+    const claudeCmd = `claude --dangerously-skip-permissions ${resumeFlag} -p '${escapedPrompt}' --output-format stream-json --verbose --include-partial-messages < /dev/null 2>&1`;
 
     const args = [
       "run",
@@ -500,6 +500,29 @@ export class PodmanRunner {
           resolve([]);
         }
       });
+    });
+  }
+
+  /**
+   * Stream logs from a running container in real-time.
+   * Calls onData for each chunk of output.
+   * Returns when the container exits (via podman wait).
+   */
+  async streamContainerLogs(
+    containerName: string,
+    onData: (chunk: string) => void
+  ): Promise<number> {
+    return new Promise((resolve) => {
+      // Use `podman logs -f` to follow logs in real-time
+      const proc = spawn(this.config.runtime, ["logs", "-f", containerName], {
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+
+      proc.stdout.on("data", (data: Buffer) => onData(data.toString()));
+      proc.stderr.on("data", (data: Buffer) => onData(data.toString()));
+
+      proc.on("close", (code) => resolve(code ?? 0));
+      proc.on("error", () => resolve(1));
     });
   }
 

@@ -31,6 +31,7 @@ export interface JobState {
   outputSize: number;
   outputTruncated: boolean;
   metrics: ResourceMetrics | null;
+  lastOutputAt: string | null; // ISO timestamp of last output received
 }
 
 export interface JobOutputResult {
@@ -236,6 +237,7 @@ export class SessionManager {
       outputSize: 0,
       outputTruncated: false,
       metrics: null,
+      lastOutputAt: null,
     };
 
     await fs.writeFile(this.jobFile(sessionKey, jobId), JSON.stringify(job, null, 2));
@@ -388,32 +390,39 @@ export class SessionManager {
 
     await fs.appendFile(job.outputFile, content);
 
-    // Update output size
+    // Update output size and last output timestamp
     const stat = await fs.stat(job.outputFile);
-    await this.updateJob(sessionKey, jobId, { outputSize: stat.size });
+    await this.updateJob(sessionKey, jobId, {
+      outputSize: stat.size,
+      lastOutputAt: new Date().toISOString(),
+    });
   }
 
   /**
    * Read the last N bytes from job output (tail).
-   * Also returns the time since last modification.
+   * Also returns the time since last output was received.
    */
   async readJobOutputTail(
     sessionKey: string,
     jobId: string,
     tailBytes = 500
-  ): Promise<{ tail: string; lastModifiedSecondsAgo: number | null; totalSize: number }> {
+  ): Promise<{ tail: string; lastOutputSecondsAgo: number | null; totalSize: number }> {
     const job = await this.getJob(sessionKey, jobId);
     if (!job) {
       throw new Error(`Job not found: ${jobId}`);
     }
 
+    // Use lastOutputAt from job metadata for accurate tracking
+    const lastOutputSecondsAgo = job.lastOutputAt
+      ? (Date.now() - new Date(job.lastOutputAt).getTime()) / 1000
+      : null;
+
     try {
       const stat = await fs.stat(job.outputFile);
       const totalSize = stat.size;
-      const lastModifiedSecondsAgo = (Date.now() - stat.mtimeMs) / 1000;
 
       if (totalSize === 0) {
-        return { tail: "", lastModifiedSecondsAgo, totalSize };
+        return { tail: "", lastOutputSecondsAgo, totalSize };
       }
 
       const offset = Math.max(0, totalSize - tailBytes);
@@ -428,13 +437,13 @@ export class SessionManager {
           tail = "..." + tail;
         }
 
-        return { tail, lastModifiedSecondsAgo, totalSize };
+        return { tail, lastOutputSecondsAgo, totalSize };
       } finally {
         await handle.close();
       }
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-        return { tail: "", lastModifiedSecondsAgo: null, totalSize: 0 };
+        return { tail: "", lastOutputSecondsAgo, totalSize: 0 };
       }
       throw err;
     }

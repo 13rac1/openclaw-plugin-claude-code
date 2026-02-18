@@ -919,6 +919,7 @@ describe("SessionManager", () => {
 
   describe("readJobOutputTail", () => {
     it("reads last N bytes from output file", async () => {
+      const lastOutputAt = new Date(Date.now() - 5000).toISOString(); // 5 seconds ago
       const job = {
         jobId: "job-123",
         sessionKey: "test",
@@ -935,6 +936,7 @@ describe("SessionManager", () => {
         outputSize: 1000,
         outputTruncated: false,
         metrics: null,
+        lastOutputAt,
       };
 
       const mockHandle = {
@@ -945,15 +947,15 @@ describe("SessionManager", () => {
       mockFs.readFile.mockResolvedValue(JSON.stringify(job));
       mockFs.stat.mockResolvedValue({
         size: 1000,
-        mtimeMs: Date.now() - 5000, // 5 seconds ago
+        mtimeMs: Date.now() - 5000,
       } as any);
       mockFs.open.mockResolvedValue(mockHandle as any);
 
       const result = await manager.readJobOutputTail("test", "job-123", 100);
 
       expect(result.totalSize).toBe(1000);
-      expect(result.lastModifiedSecondsAgo).toBeGreaterThanOrEqual(4);
-      expect(result.lastModifiedSecondsAgo).toBeLessThan(7);
+      expect(result.lastOutputSecondsAgo).toBeGreaterThanOrEqual(4);
+      expect(result.lastOutputSecondsAgo).toBeLessThan(7);
       // Read should start at offset 900 (1000 - 100)
       expect(mockHandle.read).toHaveBeenCalledWith(expect.any(Buffer), 0, 100, 900);
     });
@@ -1068,7 +1070,7 @@ describe("SessionManager", () => {
       expect(result.totalSize).toBe(0);
     });
 
-    it("returns null lastModifiedSecondsAgo when file does not exist", async () => {
+    it("returns null lastOutputSecondsAgo when file does not exist", async () => {
       const job = {
         jobId: "job-123",
         sessionKey: "test",
@@ -1085,6 +1087,7 @@ describe("SessionManager", () => {
         outputSize: 0,
         outputTruncated: false,
         metrics: null,
+        lastOutputAt: null,
       };
 
       const error = new Error("ENOENT") as NodeJS.ErrnoException;
@@ -1096,7 +1099,7 @@ describe("SessionManager", () => {
       const result = await manager.readJobOutputTail("test", "job-123");
 
       expect(result.tail).toBe("");
-      expect(result.lastModifiedSecondsAgo).toBeNull();
+      expect(result.lastOutputSecondsAgo).toBeNull();
       expect(result.totalSize).toBe(0);
     });
 

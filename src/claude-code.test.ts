@@ -71,6 +71,7 @@ describe("register", () => {
     listContainersByPrefix: Mock;
     sessionKeyFromContainerName: Mock;
     waitForContainer: Mock;
+    streamContainerLogs: Mock;
   };
 
   beforeEach(() => {
@@ -103,6 +104,7 @@ describe("register", () => {
       listContainersByPrefix: vi.fn().mockResolvedValue([]),
       sessionKeyFromContainerName: vi.fn(),
       waitForContainer: vi.fn().mockResolvedValue(0),
+      streamContainerLogs: vi.fn().mockResolvedValue(0), // Returns exit code 0 after streaming
     };
 
     vi.mocked(sessionManagerModule.SessionManager).mockImplementation(
@@ -728,7 +730,13 @@ describe("register", () => {
         startedAt: "2024-01-15T10:00:00.000Z",
         finishedAt: "2024-01-15T10:05:00.000Z",
       });
-      mockPodmanRunner.getContainerLogs.mockResolvedValue("Job output logs");
+      // Return valid stream-json format that will be parsed
+      const jsonLogs = [
+        '{"event":{"type":"content_block_delta","delta":{"text":"Job "}}}',
+        '{"event":{"type":"content_block_delta","delta":{"text":"output "}}}',
+        '{"event":{"type":"content_block_delta","delta":{"text":"logs"}}}',
+      ].join("\n");
+      mockPodmanRunner.getContainerLogs.mockResolvedValue(jsonLogs);
       mockSessionManager.appendJobOutput.mockResolvedValue(undefined);
       mockSessionManager.updateJob.mockResolvedValue({});
       mockSessionManager.setActiveJob.mockResolvedValue(undefined);
@@ -740,6 +748,7 @@ describe("register", () => {
       // Allow async recovery to complete
       await new Promise((r) => setImmediate(r));
 
+      // Extracted text from JSON stream
       expect(mockSessionManager.appendJobOutput).toHaveBeenCalledWith(
         "test-session",
         "job-123",

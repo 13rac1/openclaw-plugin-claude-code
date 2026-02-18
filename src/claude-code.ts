@@ -6,6 +6,7 @@ import { homedir } from "node:os";
 import { SessionManager } from "./session-manager.js";
 import { PodmanRunner } from "./podman-runner.js";
 import { notifyJobCompletion, type JobCompletionEvent } from "./notification.js";
+import { parseStreamLine, extractTextFromStream } from "./stream-parser.js";
 
 /**
  * Plugin configuration interface
@@ -196,22 +197,42 @@ export default function register(api: PluginApi): void {
     }
   }
 
-  // Background watcher for job completion
+  // Background watcher for job completion with real-time streaming
   function watchJobCompletion(sessionKey: string, jobId: string, containerName: string): void {
     // Fire and forget - runs in background
     void (async () => {
       try {
-        console.log(`[claude-code] Watching job ${jobId} for completion`);
+        console.log(`[claude-code] Streaming job ${jobId} output`);
 
-        // Wait for container to exit
-        const exitCode = await podmanRunner.waitForContainer(containerName);
-        console.log(`[claude-code] Container ${containerName} exited with code ${String(exitCode)}`);
+        let lineBuffer = "";
 
-        // Get final logs
-        const logs = await podmanRunner.getContainerLogs(containerName);
-        if (logs) {
-          await sessionManager.appendJobOutput(sessionKey, jobId, logs);
+        // Stream logs in real-time, parsing JSON events as they arrive
+        const exitCode = await podmanRunner.streamContainerLogs(containerName, (chunk) => {
+          // Accumulate lines and parse stream-json events
+          lineBuffer += chunk;
+          const lines = lineBuffer.split("\n");
+          lineBuffer = lines.pop() ?? ""; // Keep incomplete line in buffer
+
+          for (const line of lines) {
+            if (!line.trim()) continue;
+
+            const event = parseStreamLine(line);
+            if (event?.type === "text") {
+              // Append extracted text to output file (fire and forget)
+              void sessionManager.appendJobOutput(sessionKey, jobId, event.content);
+            }
+          }
+        });
+
+        // Process any remaining buffered content
+        if (lineBuffer.trim()) {
+          const event = parseStreamLine(lineBuffer);
+          if (event?.type === "text") {
+            await sessionManager.appendJobOutput(sessionKey, jobId, event.content);
+          }
         }
+
+        console.log(`[claude-code] Container ${containerName} exited with code ${String(exitCode)}`);
 
         // Get job to calculate elapsed time
         const job = await sessionManager.getJob(sessionKey, jobId);
@@ -417,10 +438,14 @@ export default function register(api: PluginApi): void {
         const containerStatus = await podmanRunner.getContainerStatus(job.containerName);
 
         if (containerStatus && !containerStatus.running) {
-          // Container finished - update job
+          // Container finished - parse JSON logs and extract text
           const logs = await podmanRunner.getContainerLogs(job.containerName);
           if (logs) {
-            await sessionManager.appendJobOutput(sessionKey, jobId, logs);
+            const lines = logs.split("\n").filter((l) => l.trim());
+            const text = extractTextFromStream(lines);
+            if (text) {
+              await sessionManager.appendJobOutput(sessionKey, jobId, text);
+            }
           }
 
           const status = containerStatus.exitCode === 0 ? "completed" : "failed";
@@ -443,12 +468,8 @@ export default function register(api: PluginApi): void {
           // Clean up container
           await podmanRunner.killContainer(sessionKey);
         } else if (containerStatus) {
-          // Still running - get latest logs and metrics
-          const logs = await podmanRunner.getContainerLogs(job.containerName);
-          if (logs) {
-            await sessionManager.appendJobOutput(sessionKey, jobId, logs);
-          }
-
+          // Still running - streaming watcher handles output capture
+          // Just get metrics for status reporting
           const metrics = await podmanRunner.getContainerStats(job.containerName);
           if (metrics) {
             await sessionManager.updateJob(sessionKey, jobId, { metrics });
@@ -470,10 +491,10 @@ export default function register(api: PluginApi): void {
       // Determine activity state based on output recency and resource usage
       let activityState: "active" | "processing" | "idle" = "idle";
       if (job.status === "running") {
-        const lastOutputSecondsAgo = tailResult.lastModifiedSecondsAgo ?? Infinity;
+        const lastOutputAgo = tailResult.lastOutputSecondsAgo ?? Infinity;
         const cpuPercent = job.metrics?.cpuPercent ?? 0;
 
-        if (lastOutputSecondsAgo < 10) {
+        if (lastOutputAgo < 10) {
           activityState = "active"; // Actively producing output
         } else if (cpuPercent > 20) {
           activityState = "processing"; // Working but no output yet
@@ -489,8 +510,8 @@ export default function register(api: PluginApi): void {
         elapsedSeconds: Math.round(elapsedSeconds * 10) / 10,
         outputSize: tailResult.totalSize,
         lastOutputSecondsAgo:
-          tailResult.lastModifiedSecondsAgo !== null
-            ? Math.round(tailResult.lastModifiedSecondsAgo)
+          tailResult.lastOutputSecondsAgo !== null
+            ? Math.round(tailResult.lastOutputSecondsAgo)
             : null,
         activityState,
         tailOutput: tailResult.tail,
@@ -543,13 +564,8 @@ export default function register(api: PluginApi): void {
         throw new Error(`Job not found: ${jobId}`);
       }
 
-      // If running, capture latest logs first
-      if (job.status === "running") {
-        const logs = await podmanRunner.getContainerLogs(job.containerName);
-        if (logs) {
-          await sessionManager.appendJobOutput(sessionKey, jobId, logs);
-        }
-      }
+      // Note: Output is captured in real-time by the streaming watcher
+      // No need to fetch logs here - just read from the output file
 
       const offset = (params.offset as number | undefined) ?? 0;
       const limit = (params.limit as number | undefined) ?? 65536;
@@ -738,13 +754,18 @@ async function recoverOrphanedJobs(
       if (activeJob?.containerName === container.name) {
         // Job exists for this container
         if (!container.running) {
-          // Container finished while plugin was down - update job
+          // Container finished while plugin was down - parse JSON logs and update job
           // Note: No notification sent for recovered jobs (user wasn't actively waiting)
           const status = await podmanRunner.getContainerStatus(container.name);
           const logs = await podmanRunner.getContainerLogs(container.name);
 
           if (logs) {
-            await sessionManager.appendJobOutput(sessionKey, activeJob.jobId, logs);
+            // Parse JSON stream output and extract text
+            const lines = logs.split("\n").filter((l) => l.trim());
+            const text = extractTextFromStream(lines);
+            if (text) {
+              await sessionManager.appendJobOutput(sessionKey, activeJob.jobId, text);
+            }
           }
 
           await sessionManager.updateJob(sessionKey, activeJob.jobId, {
@@ -757,7 +778,7 @@ async function recoverOrphanedJobs(
           await sessionManager.setActiveJob(sessionKey, null);
           await podmanRunner.killContainer(sessionKey);
         }
-        // If still running, leave it alone - normal polling will handle it
+        // If still running, leave it alone - status checks will handle it
       } else {
         // Orphaned container with no matching job - kill it
         await podmanRunner.killContainer(sessionKey);

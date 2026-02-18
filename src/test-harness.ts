@@ -138,17 +138,17 @@ async function main(): Promise<void> {
       const metrics = await podmanRunner.getContainerStats(containerName);
 
       // Determine activity state
-      const lastOutputSecondsAgo = tailResult.lastModifiedSecondsAgo ?? Infinity;
+      const lastOutputAgo = tailResult.lastOutputSecondsAgo ?? Infinity;
       const cpuPercent = metrics?.cpuPercent ?? 0;
       let activityState = "idle";
-      if (lastOutputSecondsAgo < 10) {
+      if (lastOutputAgo < 10) {
         activityState = "active";
       } else if (cpuPercent > 20) {
         activityState = "processing";
       }
 
       console.log(
-        `[poll ${String(pollCount)}] activity=${activityState}, lastOutput=${String(Math.round(lastOutputSecondsAgo))}s ago, ` +
+        `[poll ${String(pollCount)}] activity=${activityState}, lastOutput=${String(Math.round(lastOutputAgo))}s ago, ` +
           `output=${String(tailResult.totalSize)} bytes, cpu=${String(Math.round(cpuPercent))}%`
       );
       if (tailResult.tail) {
