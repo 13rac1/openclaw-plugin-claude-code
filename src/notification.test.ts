@@ -70,7 +70,7 @@ describe("notification", () => {
       expect(body.message).toContain("test-job-123");
       expect(body.message).toContain("test-session");
       expect(body.message).toContain("✅ completed");
-      expect(body.message).toContain("46s"); // 45.5 rounds to 46
+      expect(body.message).toContain("45s"); // 45.5 truncates to 45
       expect(body.message).toContain("12.2 KB");
     });
 

@@ -2,6 +2,8 @@
  * Job completion notification service for OpenClaw webhook integration
  */
 
+import { formatDuration, formatBytes } from "./format.js";
+
 export interface JobCompletionEvent {
   jobId: string;
   sessionKey: string;
@@ -24,7 +26,7 @@ function formatCompletionMessage(event: JobCompletionEvent): string {
   const statusEmoji =
     event.status === "completed" ? "✅" : event.status === "cancelled" ? "⚪" : "❌";
 
-  const duration = formatDuration(event.elapsedSeconds);
+  const duration = formatDuration(event.elapsedSeconds * 1000);
   const outputSize = formatBytes(event.outputSize);
 
   let message = `🔔 Claude Code Job ${event.status === "completed" ? "Completed" : event.status === "cancelled" ? "Cancelled" : "Failed"}\n\n`;
@@ -45,32 +47,6 @@ function formatCompletionMessage(event: JobCompletionEvent): string {
   message += "\nUse claude_code_output to read the results.";
 
   return message;
-}
-
-/**
- * Format seconds as human-readable duration
- */
-function formatDuration(seconds: number): string {
-  const mins = Math.floor(seconds / 60);
-  const secs = Math.round(seconds % 60);
-
-  if (mins > 0) {
-    return `${String(mins)}m ${String(secs)}s`;
-  }
-  return `${String(secs)}s`;
-}
-
-/**
- * Format bytes as human-readable size
- */
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) {
-    return `${String(bytes)} B`;
-  }
-  if (bytes < 1024 * 1024) {
-    return `${String(Math.round((bytes / 1024) * 10) / 10)} KB`;
-  }
-  return `${String(Math.round((bytes / (1024 * 1024)) * 10) / 10)} MB`;
 }
 
 /**

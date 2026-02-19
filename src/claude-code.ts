@@ -3,7 +3,7 @@ import * as fs from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import * as path from "node:path";
 import { homedir } from "node:os";
-import { SessionManager } from "./session-manager.js";
+import { SessionManager, type JobState } from "./session-manager.js";
 import { PodmanRunner, type ErrorType } from "./podman-runner.js";
 import { notifyJobCompletion, type JobCompletionEvent } from "./notification.js";
 import {
@@ -12,6 +12,7 @@ import {
   parseRateLimitError,
   type RateLimitInfo,
 } from "./stream-parser.js";
+import { formatDuration } from "./format.js";
 
 /**
  * Plugin configuration interface
@@ -70,27 +71,6 @@ interface PluginApi {
     parameters: unknown;
     execute: (id: string, params: Record<string, unknown>) => Promise<{ content: ContentItem[] }>;
   }): void;
-}
-
-/**
- * Format milliseconds as human-readable duration
- */
-export function formatDuration(ms: number): string {
-  const seconds = Math.floor(ms / 1000);
-  const minutes = Math.floor(seconds / 60);
-  const hours = Math.floor(minutes / 60);
-  const days = Math.floor(hours / 24);
-
-  if (days > 0) {
-    return `${String(days)}d ${String(hours % 24)}h`;
-  }
-  if (hours > 0) {
-    return `${String(hours)}h ${String(minutes % 60)}m`;
-  }
-  if (minutes > 0) {
-    return `${String(minutes)}m ${String(seconds % 60)}s`;
-  }
-  return `${String(seconds)}s`;
 }
 
 /**
@@ -156,6 +136,32 @@ export default function register(api: PluginApi): void {
   // Get path to host credentials file
   function getHostCredsPath(): string {
     return path.join(homedir(), ".claude", ".credentials.json");
+  }
+
+  // Find a job by ID, searching all sessions if session_id not provided
+  async function findJob(
+    jobId: string,
+    sessionId?: string
+  ): Promise<{ job: JobState; sessionKey: string }> {
+    let sessionKey = sessionId;
+    let job = sessionKey ? await sessionManager.getJob(sessionKey, jobId) : null;
+
+    if (!job) {
+      const sessions = await sessionManager.listSessions();
+      for (const session of sessions) {
+        job = await sessionManager.getJob(session.sessionKey, jobId);
+        if (job) {
+          sessionKey = session.sessionKey;
+          break;
+        }
+      }
+    }
+
+    if (!job || !sessionKey) {
+      throw new Error(`Job not found: ${jobId}`);
+    }
+
+    return { job, sessionKey };
   }
 
   // Get webhook token - try plugin config first, then read OpenClaw config file
@@ -450,24 +456,9 @@ export default function register(api: PluginApi): void {
       }
 
       // Find the job - try provided session_id first, then search all sessions
-      let sessionKey = params.session_id as string | undefined;
-      let job = sessionKey ? await sessionManager.getJob(sessionKey, jobId) : null;
-
-      if (!job) {
-        // Search all sessions for the job
-        const sessions = await sessionManager.listSessions();
-        for (const session of sessions) {
-          job = await sessionManager.getJob(session.sessionKey, jobId);
-          if (job) {
-            sessionKey = session.sessionKey;
-            break;
-          }
-        }
-      }
-
-      if (!job || !sessionKey) {
-        throw new Error(`Job not found: ${jobId}`);
-      }
+      const found = await findJob(jobId, params.session_id as string | undefined);
+      let job = found.job;
+      const sessionKey = found.sessionKey;
 
       // If job is running, check container status
       if (job.status === "running") {
@@ -582,23 +573,7 @@ export default function register(api: PluginApi): void {
       }
 
       // Find the job
-      let sessionKey = params.session_id as string | undefined;
-      let job = sessionKey ? await sessionManager.getJob(sessionKey, jobId) : null;
-
-      if (!job) {
-        const sessions = await sessionManager.listSessions();
-        for (const session of sessions) {
-          job = await sessionManager.getJob(session.sessionKey, jobId);
-          if (job) {
-            sessionKey = session.sessionKey;
-            break;
-          }
-        }
-      }
-
-      if (!job || !sessionKey) {
-        throw new Error(`Job not found: ${jobId}`);
-      }
+      const { job, sessionKey } = await findJob(jobId, params.session_id as string | undefined);
 
       // Note: Output is captured in real-time by the streaming watcher
       // No need to fetch logs here - just read from the output file
@@ -631,23 +606,7 @@ export default function register(api: PluginApi): void {
       }
 
       // Find the job
-      let sessionKey = params.session_id as string | undefined;
-      let job = sessionKey ? await sessionManager.getJob(sessionKey, jobId) : null;
-
-      if (!job) {
-        const sessions = await sessionManager.listSessions();
-        for (const session of sessions) {
-          job = await sessionManager.getJob(session.sessionKey, jobId);
-          if (job) {
-            sessionKey = session.sessionKey;
-            break;
-          }
-        }
-      }
-
-      if (!job || !sessionKey) {
-        throw new Error(`Job not found: ${jobId}`);
-      }
+      const { job, sessionKey } = await findJob(jobId, params.session_id as string | undefined);
 
       if (job.status !== "running" && job.status !== "pending") {
         return {
