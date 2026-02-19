@@ -12,7 +12,13 @@ export interface PodmanConfig {
   maxOutputSize: number; // Maximum output size in bytes (0 = unlimited)
 }
 
-export type ErrorType = "startup_timeout" | "idle_timeout" | "oom" | "crash" | "spawn_failed";
+export type ErrorType =
+  | "startup_timeout"
+  | "idle_timeout"
+  | "oom"
+  | "crash"
+  | "spawn_failed"
+  | "rate_limit";
 
 export interface ResourceMetrics {
   memoryUsageMB?: number;

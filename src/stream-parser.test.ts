@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { parseStreamLine, extractTextFromStream } from "./stream-parser.js";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { parseStreamLine, extractTextFromStream, parseRateLimitError } from "./stream-parser.js";
 
 describe("parseStreamLine", () => {
   it("parses content_block_delta event with text", () => {
@@ -102,5 +102,134 @@ describe("extractTextFromStream", () => {
 
     const result = extractTextFromStream(lines);
     expect(result).toBe("");
+  });
+});
+
+describe("parseRateLimitError", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("detects rate limit error with pm time format", () => {
+    // Set current time to 6pm UTC
+    vi.setSystemTime(new Date("2024-01-15T18:00:00.000Z"));
+
+    const line = JSON.stringify({
+      type: "result",
+      subtype: "success",
+      is_error: true,
+      result: "You've hit your limit · resets 8pm (UTC)",
+    });
+
+    const result = parseRateLimitError(line);
+
+    expect(result).not.toBeNull();
+    expect(result?.resetTime).toBe("8pm UTC");
+    expect(result?.waitMinutes).toBe(120); // 2 hours = 120 minutes
+  });
+
+  it("detects rate limit error with am time format", () => {
+    // Set current time to 11pm UTC
+    vi.setSystemTime(new Date("2024-01-15T23:00:00.000Z"));
+
+    const line = JSON.stringify({
+      type: "result",
+      is_error: true,
+      result: "You've hit your limit · resets 2am (UTC)",
+    });
+
+    const result = parseRateLimitError(line);
+
+    expect(result).not.toBeNull();
+    expect(result?.resetTime).toBe("2am UTC");
+    expect(result?.waitMinutes).toBe(180); // 3 hours = 180 minutes
+  });
+
+  it("handles reset time that wraps to next day", () => {
+    // Set current time to 10pm UTC
+    vi.setSystemTime(new Date("2024-01-15T22:30:00.000Z"));
+
+    const line = JSON.stringify({
+      type: "result",
+      is_error: true,
+      result: "You've hit your limit · resets 6am (UTC)",
+    });
+
+    const result = parseRateLimitError(line);
+
+    expect(result).not.toBeNull();
+    expect(result?.waitMinutes).toBe(450); // 7.5 hours = 450 minutes
+  });
+
+  it("returns null for non-rate-limit result", () => {
+    const line = JSON.stringify({
+      type: "result",
+      is_error: false,
+      result: "Task completed successfully",
+    });
+
+    const result = parseRateLimitError(line);
+    expect(result).toBeNull();
+  });
+
+  it("returns null for error without rate limit message", () => {
+    const line = JSON.stringify({
+      type: "result",
+      is_error: true,
+      result: "API error occurred",
+    });
+
+    const result = parseRateLimitError(line);
+    expect(result).toBeNull();
+  });
+
+  it("returns null for non-result event type", () => {
+    const line = JSON.stringify({
+      type: "message",
+      content: "You've hit your limit · resets 8pm (UTC)",
+    });
+
+    const result = parseRateLimitError(line);
+    expect(result).toBeNull();
+  });
+
+  it("returns null for malformed JSON", () => {
+    const result = parseRateLimitError("not valid json");
+    expect(result).toBeNull();
+  });
+
+  it("returns null for non-object input", () => {
+    const result = parseRateLimitError("[1, 2, 3]");
+    expect(result).toBeNull();
+  });
+
+  it("handles 12pm correctly", () => {
+    vi.setSystemTime(new Date("2024-01-15T10:00:00.000Z"));
+
+    const line = JSON.stringify({
+      type: "result",
+      is_error: true,
+      result: "You've hit your limit · resets 12pm (UTC)",
+    });
+
+    const result = parseRateLimitError(line);
+    expect(result?.waitMinutes).toBe(120); // 2 hours
+  });
+
+  it("handles 12am correctly", () => {
+    vi.setSystemTime(new Date("2024-01-15T22:00:00.000Z"));
+
+    const line = JSON.stringify({
+      type: "result",
+      is_error: true,
+      result: "You've hit your limit · resets 12am (UTC)",
+    });
+
+    const result = parseRateLimitError(line);
+    expect(result?.waitMinutes).toBe(120); // 2 hours
   });
 });

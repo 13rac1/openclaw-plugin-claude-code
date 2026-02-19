@@ -4,9 +4,14 @@ import { readFileSync } from "node:fs";
 import * as path from "node:path";
 import { homedir } from "node:os";
 import { SessionManager } from "./session-manager.js";
-import { PodmanRunner } from "./podman-runner.js";
+import { PodmanRunner, type ErrorType } from "./podman-runner.js";
 import { notifyJobCompletion, type JobCompletionEvent } from "./notification.js";
-import { parseStreamLine, extractTextFromStream } from "./stream-parser.js";
+import {
+  parseStreamLine,
+  extractTextFromStream,
+  parseRateLimitError,
+  type RateLimitInfo,
+} from "./stream-parser.js";
 
 /**
  * Plugin configuration interface
@@ -205,6 +210,7 @@ export default function register(api: PluginApi): void {
         console.log(`[claude-code] Streaming job ${jobId} output`);
 
         let lineBuffer = "";
+        let rateLimitInfo: RateLimitInfo | null = null;
 
         // Stream logs in real-time, parsing JSON events as they arrive
         const exitCode = await podmanRunner.streamContainerLogs(containerName, (chunk) => {
@@ -216,6 +222,15 @@ export default function register(api: PluginApi): void {
           for (const line of lines) {
             if (!line.trim()) continue;
 
+            // Check for rate limit error in result events
+            const rateLimit = parseRateLimitError(line);
+            if (rateLimit) {
+              rateLimitInfo = rateLimit;
+              console.log(
+                `[claude-code] Rate limit detected: resets in ${String(rateLimit.waitMinutes)} minutes`
+              );
+            }
+
             const event = parseStreamLine(line);
             if (event?.type === "text") {
               // Append extracted text to output file (fire and forget)
@@ -226,6 +241,12 @@ export default function register(api: PluginApi): void {
 
         // Process any remaining buffered content
         if (lineBuffer.trim()) {
+          // Check for rate limit in final line
+          const rateLimit = parseRateLimitError(lineBuffer);
+          if (rateLimit) {
+            rateLimitInfo = rateLimit;
+          }
+
           const event = parseStreamLine(lineBuffer);
           if (event?.type === "text") {
             await sessionManager.appendJobOutput(sessionKey, jobId, event.content);
@@ -243,9 +264,21 @@ export default function register(api: PluginApi): void {
           return;
         }
 
-        // Determine status
-        const status = exitCode === 0 ? "completed" : "failed";
-        const errorType = exitCode === 137 ? "oom" : exitCode !== 0 ? "crash" : null;
+        // Determine status and error type
+        let status: "completed" | "failed" = exitCode === 0 ? "completed" : "failed";
+        let errorType: ErrorType | null = null;
+        let errorMessage: string | null = null;
+
+        if (rateLimitInfo) {
+          // Rate limit is a failure even with exit code 0
+          status = "failed";
+          errorType = "rate_limit";
+          errorMessage = `Claude Code rate limit hit. Wait ${String(rateLimitInfo.waitMinutes)} minutes (resets at ${rateLimitInfo.resetTime}).`;
+        } else if (exitCode === 137) {
+          errorType = "oom";
+        } else if (exitCode !== 0) {
+          errorType = "crash";
+        }
 
         // Update job state
         const updatedJob = await sessionManager.updateJob(sessionKey, jobId, {
@@ -253,6 +286,7 @@ export default function register(api: PluginApi): void {
           completedAt: new Date().toISOString(),
           exitCode,
           errorType,
+          errorMessage,
         });
 
         // Clear active job
