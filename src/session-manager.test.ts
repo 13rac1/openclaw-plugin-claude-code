@@ -464,6 +464,84 @@ describe("SessionManager", () => {
 
       await expect(manager.getJob("test", "job-123")).rejects.toThrow("Permission denied");
     });
+
+    it("retries on empty file and succeeds", async () => {
+      vi.useRealTimers(); // Retry uses setTimeout
+      const jobData = {
+        jobId: "job-123",
+        sessionKey: "test",
+        containerName: "claude-test",
+        status: "running",
+        prompt: "test",
+        createdAt: "2024-01-15T10:00:00.000Z",
+        startedAt: null,
+        completedAt: null,
+        exitCode: null,
+        errorType: null,
+        errorMessage: null,
+        outputFile: "/path/to/output.log",
+        outputSize: 0,
+        outputTruncated: false,
+        metrics: null,
+      };
+
+      // First call returns empty, second returns valid JSON
+      mockFs.readFile.mockResolvedValueOnce("").mockResolvedValueOnce(JSON.stringify(jobData));
+
+      const result = await manager.getJob("test", "job-123");
+
+      expect(result).toEqual(jobData);
+      expect(mockFs.readFile).toHaveBeenCalledTimes(2);
+    });
+
+    it("retries on JSON parse error and succeeds", async () => {
+      vi.useRealTimers(); // Retry uses setTimeout
+      const jobData = {
+        jobId: "job-123",
+        sessionKey: "test",
+        containerName: "claude-test",
+        status: "running",
+        prompt: "test",
+        createdAt: "2024-01-15T10:00:00.000Z",
+        startedAt: null,
+        completedAt: null,
+        exitCode: null,
+        errorType: null,
+        errorMessage: null,
+        outputFile: "/path/to/output.log",
+        outputSize: 0,
+        outputTruncated: false,
+        metrics: null,
+      };
+
+      // First call returns truncated JSON, second returns valid JSON
+      mockFs.readFile
+        .mockResolvedValueOnce('{"jobId":')
+        .mockResolvedValueOnce(JSON.stringify(jobData));
+
+      const result = await manager.getJob("test", "job-123");
+
+      expect(result).toEqual(jobData);
+      expect(mockFs.readFile).toHaveBeenCalledTimes(2);
+    });
+
+    it("returns null after all retries exhausted for empty file", async () => {
+      vi.useRealTimers(); // Retry uses setTimeout
+      mockFs.readFile.mockResolvedValue("");
+
+      const result = await manager.getJob("test", "job-123");
+
+      expect(result).toBeNull();
+      expect(mockFs.readFile).toHaveBeenCalledTimes(3); // Default retries
+    });
+
+    it("throws after all retries exhausted for JSON parse error", async () => {
+      vi.useRealTimers(); // Retry uses setTimeout
+      mockFs.readFile.mockResolvedValue("{invalid json");
+
+      await expect(manager.getJob("test", "job-123")).rejects.toThrow(SyntaxError);
+      expect(mockFs.readFile).toHaveBeenCalledTimes(3);
+    });
   });
 
   describe("updateJob", () => {
@@ -506,6 +584,45 @@ describe("SessionManager", () => {
 
       await expect(manager.updateJob("test", "nonexistent", { status: "running" })).rejects.toThrow(
         "Job not found: nonexistent"
+      );
+    });
+
+    it("uses atomic write (temp file + rename)", async () => {
+      const existingJob = {
+        jobId: "job-123",
+        sessionKey: "test",
+        containerName: "claude-test",
+        status: "pending",
+        prompt: "test",
+        createdAt: "2024-01-15T10:00:00.000Z",
+        startedAt: null,
+        completedAt: null,
+        exitCode: null,
+        errorType: null,
+        errorMessage: null,
+        outputFile: "/path/to/output.log",
+        outputSize: 0,
+        outputTruncated: false,
+        metrics: null,
+        lastOutputAt: null,
+      };
+
+      mockFs.readFile.mockResolvedValue(JSON.stringify(existingJob));
+      mockFs.writeFile.mockResolvedValue(undefined);
+      mockFs.rename.mockResolvedValue(undefined);
+
+      await manager.updateJob("test", "job-123", { status: "running" });
+
+      // Should write to temp file first
+      expect(mockFs.writeFile).toHaveBeenCalledTimes(1);
+      const writeCall = mockFs.writeFile.mock.calls[0];
+      expect(writeCall[0]).toMatch(/job-123\.json\.[a-f0-9-]+\.tmp$/);
+
+      // Should rename temp file to target
+      expect(mockFs.rename).toHaveBeenCalledTimes(1);
+      expect(mockFs.rename).toHaveBeenCalledWith(
+        writeCall[0],
+        "/var/openclaw/sessions/test/jobs/job-123.json"
       );
     });
   });

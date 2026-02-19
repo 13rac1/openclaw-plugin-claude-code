@@ -250,21 +250,40 @@ export class SessionManager {
 
   /**
    * Get a job by ID.
+   * Retries on JSON parse errors to handle concurrent write race conditions.
    */
-  async getJob(sessionKey: string, jobId: string): Promise<JobState | null> {
-    try {
-      const data = await fs.readFile(this.jobFile(sessionKey, jobId), "utf-8");
-      return JSON.parse(data) as JobState;
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-        return null;
+  async getJob(sessionKey: string, jobId: string, retries = 3): Promise<JobState | null> {
+    const jobPath = this.jobFile(sessionKey, jobId);
+    for (let attempt = 0; attempt < retries; attempt++) {
+      try {
+        const data = await fs.readFile(jobPath, "utf-8");
+        if (!data.trim()) {
+          // Empty file - likely being written, retry
+          if (attempt < retries - 1) {
+            await new Promise((r) => setTimeout(r, 50 * (attempt + 1)));
+            continue;
+          }
+          return null;
+        }
+        return JSON.parse(data) as JobState;
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+          return null;
+        }
+        if (err instanceof SyntaxError && attempt < retries - 1) {
+          // JSON parse error - file may be partially written, retry
+          await new Promise((r) => setTimeout(r, 50 * (attempt + 1)));
+          continue;
+        }
+        throw err;
       }
-      throw err;
     }
+    return null;
   }
 
   /**
    * Update a job with partial fields.
+   * Uses atomic write (temp file + rename) to prevent read-during-write corruption.
    */
   async updateJob(
     sessionKey: string,
@@ -277,7 +296,11 @@ export class SessionManager {
     }
 
     const updated = { ...job, ...updates };
-    await fs.writeFile(this.jobFile(sessionKey, jobId), JSON.stringify(updated, null, 2));
+    const jobPath = this.jobFile(sessionKey, jobId);
+    const tempPath = `${jobPath}.${randomUUID()}.tmp`;
+
+    await fs.writeFile(tempPath, JSON.stringify(updated, null, 2));
+    await fs.rename(tempPath, jobPath);
     return updated;
   }
 
@@ -381,6 +404,8 @@ export class SessionManager {
 
   /**
    * Append content to job output file.
+   * Note: Does not update job metadata to avoid race conditions during rapid streaming.
+   * Output size and last output time are computed on-demand when reading.
    */
   async appendJobOutput(sessionKey: string, jobId: string, content: string): Promise<void> {
     const job = await this.getJob(sessionKey, jobId);
@@ -389,13 +414,6 @@ export class SessionManager {
     }
 
     await fs.appendFile(job.outputFile, content);
-
-    // Update output size and last output timestamp
-    const stat = await fs.stat(job.outputFile);
-    await this.updateJob(sessionKey, jobId, {
-      outputSize: stat.size,
-      lastOutputAt: new Date().toISOString(),
-    });
   }
 
   /**
@@ -412,14 +430,12 @@ export class SessionManager {
       throw new Error(`Job not found: ${jobId}`);
     }
 
-    // Use lastOutputAt from job metadata for accurate tracking
-    const lastOutputSecondsAgo = job.lastOutputAt
-      ? (Date.now() - new Date(job.lastOutputAt).getTime()) / 1000
-      : null;
-
     try {
       const stat = await fs.stat(job.outputFile);
       const totalSize = stat.size;
+
+      // Use file mtime for accurate last output tracking
+      const lastOutputSecondsAgo = totalSize > 0 ? (Date.now() - stat.mtimeMs) / 1000 : null;
 
       if (totalSize === 0) {
         return { tail: "", lastOutputSecondsAgo, totalSize };
@@ -443,7 +459,7 @@ export class SessionManager {
       }
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-        return { tail: "", lastOutputSecondsAgo, totalSize: 0 };
+        return { tail: "", lastOutputSecondsAgo: null, totalSize: 0 };
       }
       throw err;
     }
