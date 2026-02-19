@@ -54,6 +54,10 @@ const DEFAULT_CONFIG: ClaudeCodePluginConfig = {
   hooksToken: "", // Must be set to enable notifications
 };
 
+// Activity detection thresholds
+const ACTIVE_OUTPUT_THRESHOLD_SECONDS = 10; // Output within 10s = actively producing
+const PROCESSING_CPU_THRESHOLD_PERCENT = 20; // CPU > 20% = processing
+
 /** Tool response content item */
 interface ContentItem {
   type: string;
@@ -521,9 +525,9 @@ export default function register(api: PluginApi): void {
         const lastOutputAgo = tailResult.lastOutputSecondsAgo ?? Infinity;
         const cpuPercent = job.metrics?.cpuPercent ?? 0;
 
-        if (lastOutputAgo < 10) {
+        if (lastOutputAgo < ACTIVE_OUTPUT_THRESHOLD_SECONDS) {
           activityState = "active"; // Actively producing output
-        } else if (cpuPercent > 20) {
+        } else if (cpuPercent > PROCESSING_CPU_THRESHOLD_PERCENT) {
           activityState = "processing"; // Working but no output yet
         } else {
           activityState = "idle"; // May be stuck or waiting

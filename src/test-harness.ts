@@ -14,6 +14,10 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { homedir } from "node:os";
 
+// Activity detection thresholds
+const ACTIVE_OUTPUT_THRESHOLD_SECONDS = 10; // Output within 10s = actively producing
+const PROCESSING_CPU_THRESHOLD_PERCENT = 20; // CPU > 20% = processing
+
 async function main(): Promise<void> {
   console.log("=== Claude Code Plugin Test Harness ===\n");
 
@@ -141,9 +145,9 @@ async function main(): Promise<void> {
       const lastOutputAgo = tailResult.lastOutputSecondsAgo ?? Infinity;
       const cpuPercent = metrics?.cpuPercent ?? 0;
       let activityState = "idle";
-      if (lastOutputAgo < 10) {
+      if (lastOutputAgo < ACTIVE_OUTPUT_THRESHOLD_SECONDS) {
         activityState = "active";
-      } else if (cpuPercent > 20) {
+      } else if (cpuPercent > PROCESSING_CPU_THRESHOLD_PERCENT) {
         activityState = "processing";
       }
 

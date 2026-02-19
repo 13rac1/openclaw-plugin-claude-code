@@ -83,15 +83,21 @@ export interface DetachedStartResult {
 }
 
 function isPodmanStatsOutput(value: unknown): value is PodmanStatsOutput {
-  return typeof value === "object" && value !== null;
+  if (typeof value !== "object" || value === null) return false;
+  const obj = value as Record<string, unknown>;
+  return "MemUsage" in obj || "mem_usage" in obj || "MemPerc" in obj || "CPUPerc" in obj;
 }
 
 function isPodmanInspectOutput(value: unknown): value is PodmanInspectOutput {
-  return typeof value === "object" && value !== null;
+  if (typeof value !== "object" || value === null) return false;
+  const obj = value as Record<string, unknown>;
+  return "State" in obj || "Created" in obj || "Name" in obj;
 }
 
 function isPodmanPsOutput(value: unknown): value is PodmanPsOutput {
-  return typeof value === "object" && value !== null;
+  if (typeof value !== "object" || value === null) return false;
+  const obj = value as Record<string, unknown>;
+  return "Names" in obj || "State" in obj || "Status" in obj;
 }
 
 export class PodmanRunner {

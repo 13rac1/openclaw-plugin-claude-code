@@ -157,14 +157,14 @@ export class SessionManager {
 
     try {
       await fs.rm(sessionPath, { recursive: true, force: true });
-    } catch {
-      // Ignore errors
+    } catch (err) {
+      console.log(`[session-manager] Failed to delete session directory ${sessionKey}:`, err);
     }
 
     try {
       await fs.rm(workspacePath, { recursive: true, force: true });
-    } catch {
-      // Ignore errors
+    } catch (err) {
+      console.log(`[session-manager] Failed to delete workspace directory ${sessionKey}:`, err);
     }
   }
 
