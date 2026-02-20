@@ -139,11 +139,6 @@ export default function register(api: PluginApi): void {
     return { apiKey, hasCredsFile };
   }
 
-  // Get path to host credentials file
-  function getHostCredsPath(): string {
-    return path.join(homedir(), ".claude", ".credentials.json");
-  }
-
   // Find a job by ID, searching all sessions if session_id not provided
   async function findJob(
     jobId: string,
@@ -367,7 +362,7 @@ export default function register(api: PluginApi): void {
       const sessionKey = (params.session_id as string | undefined) ?? `session-${id}`;
 
       // Check authentication
-      const { apiKey, hasCredsFile } = await getAuth();
+      const { apiKey } = await getAuth();
 
       // Verify container image exists
       const imageExists = await podmanRunner.checkImage();
@@ -390,20 +385,14 @@ export default function register(api: PluginApi): void {
       }
 
       // Get paths for volume mounts
-      const claudeDir = `${config.sessionsDir.replace("~", process.env.HOME ?? "")}/${sessionKey}/.claude`;
+      // Mount host ~/.claude directly so OAuth token refreshes persist
+      const hostClaudeDir = path.join(homedir(), ".claude");
       const workspaceDir = sessionManager.workspaceDir(sessionKey);
 
-      // Copy credentials to session directory (with --userns=keep-id, we can write to the dir)
-      if (hasCredsFile) {
-        const hostCredsPath = getHostCredsPath();
-        const sessionCredsPath = path.join(claudeDir, ".credentials.json");
-        console.log(
-          `[claude-code] Copying credentials from ${hostCredsPath} to ${sessionCredsPath}`
-        );
-        await fs.copyFile(hostCredsPath, sessionCredsPath);
-      }
+      // Ensure ~/.claude directory exists
+      await fs.mkdir(hostClaudeDir, { recursive: true });
 
-      console.log(`[claude-code] Volume mounts: claudeDir=${claudeDir}`);
+      console.log(`[claude-code] Volume mounts: hostClaudeDir=${hostClaudeDir}`);
 
       // Create job record
       const containerName = podmanRunner.containerNameFromSessionKey(sessionKey);
@@ -414,7 +403,7 @@ export default function register(api: PluginApi): void {
         await podmanRunner.startDetached({
           sessionKey,
           prompt,
-          claudeDir,
+          hostClaudeDir,
           workspaceDir,
           resumeSessionId: session.claudeSessionId ?? undefined,
           apiKey,

@@ -366,7 +366,7 @@ describe("PodmanRunner", () => {
       const promise = runner.startDetached({
         sessionKey: "test-session",
         prompt: "Hello world",
-        claudeDir: "/path/.claude",
+        hostClaudeDir: "/path/.claude",
         workspaceDir: "/path/workspace",
         apiKey: "sk-test",
       });
@@ -408,7 +408,7 @@ describe("PodmanRunner", () => {
       const promise = runner.startDetached({
         sessionKey: "test",
         prompt: "test",
-        claudeDir: "/path/.claude",
+        hostClaudeDir: "/path/.claude",
         workspaceDir: "/path/workspace",
       });
 
@@ -439,7 +439,7 @@ describe("PodmanRunner", () => {
       const promise = runner.startDetached({
         sessionKey: "test",
         prompt: "test",
-        claudeDir: "/path/.claude",
+        hostClaudeDir: "/path/.claude",
         workspaceDir: "/path/workspace",
       });
 
@@ -471,7 +471,7 @@ describe("PodmanRunner", () => {
       const promise = runner.startDetached({
         sessionKey: "userns-test",
         prompt: "test userns",
-        claudeDir: "/path/.claude",
+        hostClaudeDir: "/path/.claude",
         workspaceDir: "/path/workspace",
       });
 
@@ -512,7 +512,7 @@ describe("PodmanRunner", () => {
       const promise = runner.startDetached({
         sessionKey: "mount-test",
         prompt: "test mounts",
-        claudeDir: "/path/.claude",
+        hostClaudeDir: "/path/.claude",
         workspaceDir: "/path/workspace",
       });
 

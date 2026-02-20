@@ -279,10 +279,9 @@ describe("register", () => {
       expect(mockPodmanRunner.startDetached).toHaveBeenCalled();
     });
 
-    it("copies OAuth credentials to session directory when credentials file exists", async () => {
+    it("mounts host ~/.claude directly when OAuth credentials exist", async () => {
       // Mock credentials file exists
       vi.mocked(fs.access).mockResolvedValue(undefined);
-      vi.mocked(fs.copyFile).mockResolvedValue(undefined);
       delete process.env.ANTHROPIC_API_KEY;
 
       mockPodmanRunner.checkImage.mockResolvedValue(true);
@@ -317,23 +316,18 @@ describe("register", () => {
 
       await toolConfig.execute("test-id", { prompt: "hello" });
 
-      // Verify credentials were copied to session directory
-      expect(fs.copyFile).toHaveBeenCalledWith(
-        expect.stringContaining(".claude/.credentials.json"),
-        expect.stringContaining("session-test-id/.claude/.credentials.json")
-      );
-      // Verify apiKey was NOT passed (since we're using OAuth)
+      // Verify host ~/.claude is mounted directly (not copied)
       expect(mockPodmanRunner.startDetached).toHaveBeenCalledWith(
         expect.objectContaining({
+          hostClaudeDir: expect.stringContaining(".claude"),
           apiKey: undefined,
         })
       );
     });
 
-    it("copies OAuth credentials on both first and resumed session jobs", async () => {
+    it("mounts host ~/.claude on both first and resumed session jobs", async () => {
       // Mock credentials file exists
       vi.mocked(fs.access).mockResolvedValue(undefined);
-      vi.mocked(fs.copyFile).mockResolvedValue(undefined);
       delete process.env.ANTHROPIC_API_KEY;
 
       mockPodmanRunner.checkImage.mockResolvedValue(true);
@@ -370,14 +364,14 @@ describe("register", () => {
 
       await toolConfig.execute("first-job", { prompt: "first task", session_id: "resume-test" });
 
-      // Verify credentials were copied
-      expect(fs.copyFile).toHaveBeenCalledWith(
-        expect.stringContaining(".claude/.credentials.json"),
-        expect.stringContaining("resume-test/.claude/.credentials.json")
+      // Verify host ~/.claude is mounted directly
+      expect(mockPodmanRunner.startDetached).toHaveBeenCalledWith(
+        expect.objectContaining({
+          hostClaudeDir: expect.stringContaining(".claude"),
+        })
       );
 
       // Clear for second job
-      vi.mocked(fs.copyFile).mockClear();
       vi.mocked(mockPodmanRunner.startDetached).mockClear();
 
       // Second job - resumed session (now has claudeSessionId)
@@ -394,13 +388,10 @@ describe("register", () => {
 
       await toolConfig.execute("second-job", { prompt: "second task", session_id: "resume-test" });
 
-      // Verify credentials are STILL copied on resumed session
-      expect(fs.copyFile).toHaveBeenCalledWith(
-        expect.stringContaining(".claude/.credentials.json"),
-        expect.stringContaining("resume-test/.claude/.credentials.json")
-      );
+      // Verify host ~/.claude is STILL mounted on resumed session (token refreshes persist)
       expect(mockPodmanRunner.startDetached).toHaveBeenCalledWith(
         expect.objectContaining({
+          hostClaudeDir: expect.stringContaining(".claude"),
           resumeSessionId: "claude-session-abc123", // Should have session ID this time
         })
       );

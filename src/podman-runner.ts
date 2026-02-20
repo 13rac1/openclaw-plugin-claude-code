@@ -283,12 +283,12 @@ export class PodmanRunner {
 
   /**
    * Start a container in detached mode. Returns immediately with container ID.
-   * Credentials should be copied to claudeDir before calling this method.
+   * Mounts hostClaudeDir directly so OAuth token refreshes persist to host.
    */
   async startDetached(params: {
     sessionKey: string;
     prompt: string;
-    claudeDir: string;
+    hostClaudeDir: string;
     workspaceDir: string;
     resumeSessionId?: string;
     apiKey?: string;
@@ -329,7 +329,7 @@ export class PodmanRunner {
       "--tmpfs",
       "/tmp:rw,noexec,nosuid,size=64m",
       "-v",
-      `${params.claudeDir}:/home/claude/.claude:rw`,
+      `${params.hostClaudeDir}:/home/claude/.claude:rw`,
       "-v",
       `${params.workspaceDir}:/workspace:rw`
     );

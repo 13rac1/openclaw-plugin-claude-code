@@ -10,7 +10,6 @@
 import { PodmanRunner } from "./podman-runner.js";
 import { SessionManager } from "./session-manager.js";
 import { execSync } from "node:child_process";
-import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { homedir } from "node:os";
 
@@ -86,20 +85,12 @@ async function main(): Promise<void> {
   console.log("✓ Session created:", session);
   console.log("");
 
-  // Get paths (claudeDir is private, so compute it directly)
-  const claudeDir = path.join(sessionConfig.sessionsDir, sessionKey, ".claude");
+  // Get paths - mount host's ~/.claude directly so OAuth token refreshes persist
+  const hostClaudeDir = path.join(homedir(), ".claude");
   const workspaceDir = sessionManager.workspaceDir(sessionKey);
-  console.log("Claude dir:", claudeDir);
+  console.log("Host claude dir:", hostClaudeDir);
   console.log("Workspace dir:", workspaceDir);
   console.log("");
-
-  // Copy credentials to session directory (with --userns=keep-id, we can write to the dir)
-  if (credentials) {
-    const hostCredsPath = path.join(homedir(), ".claude", ".credentials.json");
-    const sessionCredsPath = path.join(claudeDir, ".credentials.json");
-    console.log(`Copying credentials from ${hostCredsPath} to ${sessionCredsPath}`);
-    await fs.copyFile(hostCredsPath, sessionCredsPath);
-  }
 
   // Run Claude Code (async)
   const prompt = "Say 'Hello from test harness!' and nothing else";
@@ -114,7 +105,7 @@ async function main(): Promise<void> {
     const { containerName } = await podmanRunner.startDetached({
       sessionKey,
       prompt,
-      claudeDir,
+      hostClaudeDir,
       workspaceDir,
       resumeSessionId: session.claudeSessionId ?? undefined,
       apiKey: credentials ? undefined : process.env.ANTHROPIC_API_KEY,
