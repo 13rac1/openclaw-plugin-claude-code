@@ -14,6 +14,11 @@ export interface RateLimitInfo {
   waitMinutes: number; // minutes until reset
 }
 
+export interface AuthErrorInfo {
+  errorType: "token_expired" | "authentication_failed";
+  message: string;
+}
+
 // Type for parsed JSON event structure
 interface ClaudeStreamEvent {
   event?: {
@@ -103,6 +108,47 @@ export function parseRateLimitError(line: string): RateLimitInfo | null {
     const waitMinutes = calculateWaitMinutes(match[1]);
 
     return { resetTime, waitMinutes };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Check if a line is a result event indicating an authentication error.
+ * Returns auth error info if detected, null otherwise.
+ */
+export function parseAuthError(line: string): AuthErrorInfo | null {
+  try {
+    const parsed: unknown = JSON.parse(line);
+    if (typeof parsed !== "object" || parsed === null) {
+      return null;
+    }
+
+    const event = parsed as MaybeResultEvent;
+    if (event.type !== "result" || !event.is_error || typeof event.result !== "string") {
+      return null;
+    }
+
+    // Check for OAuth token expired
+    if (event.result.includes("OAuth token has expired")) {
+      return {
+        errorType: "token_expired",
+        message: "OAuth token has expired. Please re-authenticate Claude Code.",
+      };
+    }
+
+    // Check for general authentication failure
+    if (
+      event.result.includes("Failed to authenticate") ||
+      event.result.includes("authentication_error")
+    ) {
+      return {
+        errorType: "authentication_failed",
+        message: "Authentication failed. Please check your Claude Code credentials.",
+      };
+    }
+
+    return null;
   } catch {
     return null;
   }

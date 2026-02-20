@@ -18,7 +18,8 @@ export type ErrorType =
   | "oom"
   | "crash"
   | "spawn_failed"
-  | "rate_limit";
+  | "rate_limit"
+  | "auth_expired";
 
 export interface ResourceMetrics {
   memoryUsageMB?: number;

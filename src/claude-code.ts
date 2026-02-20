@@ -10,7 +10,9 @@ import {
   parseStreamLine,
   extractTextFromStream,
   parseRateLimitError,
+  parseAuthError,
   type RateLimitInfo,
+  type AuthErrorInfo,
 } from "./stream-parser.js";
 import { formatDuration } from "./format.js";
 
@@ -221,6 +223,7 @@ export default function register(api: PluginApi): void {
 
         let lineBuffer = "";
         let rateLimitInfo: RateLimitInfo | null = null;
+        let authErrorInfo: AuthErrorInfo | null = null;
 
         // Stream logs in real-time, parsing JSON events as they arrive
         const exitCode = await podmanRunner.streamContainerLogs(containerName, (chunk) => {
@@ -241,6 +244,13 @@ export default function register(api: PluginApi): void {
               );
             }
 
+            // Check for auth error in result events
+            const authError = parseAuthError(line);
+            if (authError) {
+              authErrorInfo = authError;
+              console.log(`[claude-code] Auth error detected: ${authError.errorType}`);
+            }
+
             const event = parseStreamLine(line);
             if (event?.type === "text") {
               // Append extracted text to output file (fire and forget)
@@ -255,6 +265,12 @@ export default function register(api: PluginApi): void {
           const rateLimit = parseRateLimitError(lineBuffer);
           if (rateLimit) {
             rateLimitInfo = rateLimit;
+          }
+
+          // Check for auth error in final line
+          const authError = parseAuthError(lineBuffer);
+          if (authError) {
+            authErrorInfo = authError;
           }
 
           const event = parseStreamLine(lineBuffer);
@@ -284,6 +300,11 @@ export default function register(api: PluginApi): void {
           status = "failed";
           errorType = "rate_limit";
           errorMessage = `Claude Code rate limit hit. Wait ${String(rateLimitInfo.waitMinutes)} minutes (resets at ${rateLimitInfo.resetTime}).`;
+        } else if (authErrorInfo) {
+          // Auth error is a failure even with exit code 0
+          status = "failed";
+          errorType = "auth_expired";
+          errorMessage = authErrorInfo.message;
         } else if (exitCode === 137) {
           errorType = "oom";
         } else if (exitCode !== 0) {
