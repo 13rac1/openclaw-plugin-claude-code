@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.11] - 2026-02-20
+
+### Added
+
+- Detect Claude Code authentication errors (expired OAuth tokens) and report to agent
+- Detect Claude Code rate limit errors and report wait time to agent
+- Real-time streaming output via `streamContainerLogs` (replaces polling)
+- Job completion notifications via webhook (no polling required)
+- `claude_code_sessions` tool for listing all active sessions
+
+### Fixed
+
+- Mount host `~/.claude` directly so OAuth token refreshes persist across jobs
+- Prevent race condition in concurrent job output streaming
+- Rootless Podman UID mapping with `--userns=keep-id:uid=1000,gid=1000`
+
+### Changed
+
+- `npm test` now runs formatter and linter checks before tests
+- Extracted shared formatting utilities (`formatDuration`, `formatBytes`)
+- Improved type safety, error handling, and code clarity
+
 ## [1.0.0] - 2026-02-12
 
 ### Added
@@ -30,5 +52,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Configurable network isolation
 - Optional AppArmor MAC enforcement
 
-[Unreleased]: https://github.com/13rac1/openclaw-plugin-claude-code/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/13rac1/openclaw-plugin-claude-code/compare/v1.0.11...HEAD
+[1.0.11]: https://github.com/13rac1/openclaw-plugin-claude-code/compare/v1.0.0...v1.0.11
 [1.0.0]: https://github.com/13rac1/openclaw-plugin-claude-code/releases/tag/v1.0.0

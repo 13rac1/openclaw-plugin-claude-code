@@ -62,14 +62,10 @@ openclaw plugins install @13rac1/openclaw-plugin-claude-code
 
 ### From GitHub Release
 
-Download the release zip from [GitHub Releases](https://github.com/13rac1/openclaw-plugin-claude-code/releases) and extract to your plugins directory:
+Download the latest release zip from [GitHub Releases](https://github.com/13rac1/openclaw-plugin-claude-code/releases) and extract to your plugins directory:
 
 ```bash
-# Download latest release
-curl -LO https://github.com/13rac1/openclaw-plugin-claude-code/releases/latest/download/openclaw-plugin-claude-code-1.0.4.zip
-
-# Extract to plugins directory
-unzip openclaw-plugin-claude-code-1.0.4.zip -d ~/.openclaw/plugins/openclaw-plugin-claude-code
+unzip openclaw-plugin-claude-code-*.zip -d ~/.openclaw/plugins/openclaw-plugin-claude-code
 ```
 
 ### Container Image
@@ -149,7 +145,7 @@ If you have Claude Max or enterprise OAuth credentials, place your credentials f
 ~/.claude/.credentials.json
 ```
 
-The plugin will automatically copy this file into each container session.
+The plugin mounts your `~/.claude` directory directly into each container session, so OAuth token refreshes persist automatically.
 
 ### 2. API Key
 
