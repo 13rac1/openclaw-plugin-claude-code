@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.12] - 2026-02-23
+
 ### Added
 
 - Inject host git identity into containers via `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME`, `GIT_COMMITTER_EMAIL` env vars
@@ -62,6 +64,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Configurable network isolation
 - Optional AppArmor MAC enforcement
 
-[Unreleased]: https://github.com/13rac1/openclaw-plugin-claude-code/compare/v1.0.11...HEAD
+[Unreleased]: https://github.com/13rac1/openclaw-plugin-claude-code/compare/v1.0.12...HEAD
+[1.0.12]: https://github.com/13rac1/openclaw-plugin-claude-code/compare/v1.0.11...v1.0.12
 [1.0.11]: https://github.com/13rac1/openclaw-plugin-claude-code/compare/v1.0.0...v1.0.11
 [1.0.0]: https://github.com/13rac1/openclaw-plugin-claude-code/releases/tag/v1.0.0
