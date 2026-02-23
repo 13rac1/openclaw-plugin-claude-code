@@ -147,7 +147,7 @@ describe("SessionManager (integration)", () => {
   });
 
   describe("session deletion", () => {
-    it("deletes session and workspace directories", async () => {
+    it("deletes session directory but preserves workspace", async () => {
       await manager.createSession("to-delete");
 
       const sessionDir = path.join(testDir, "sessions", "to-delete");
@@ -159,13 +159,31 @@ describe("SessionManager (integration)", () => {
 
       await manager.deleteSession("to-delete");
 
-      // Verify they're gone
+      // Session dir should be gone
       await expect(fs.stat(sessionDir)).rejects.toThrow();
-      await expect(fs.stat(workspaceDir)).rejects.toThrow();
+      // Workspace dir should still exist
+      await fs.stat(workspaceDir);
     });
 
     it("does not throw for non-existent session", async () => {
       await expect(manager.deleteSession("never-existed")).resolves.toBeUndefined();
+    });
+  });
+
+  describe("workspace deletion", () => {
+    it("deletes workspace directory", async () => {
+      await manager.createSession("ws-delete");
+
+      const workspaceDir = path.join(testDir, "workspaces", "ws-delete");
+      await fs.stat(workspaceDir);
+
+      await manager.deleteWorkspace("ws-delete");
+
+      await expect(fs.stat(workspaceDir)).rejects.toThrow();
+    });
+
+    it("does not throw for non-existent workspace", async () => {
+      await expect(manager.deleteWorkspace("never-existed")).resolves.toBeUndefined();
     });
   });
 

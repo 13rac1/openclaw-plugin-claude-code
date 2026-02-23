@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Inject host git identity into containers via `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME`, `GIT_COMMITTER_EMAIL` env vars
+- Refuse to start if host git identity (`user.name`, `user.email`) is not configured
+- `delete_workspaces` parameter on `claude_code_cleanup` for explicit workspace deletion
+
+### Fixed
+
+- `claude_code_cleanup` no longer destroys workspace data (code, files, git history) — only session metadata is removed by default
+
 ## [1.0.11] - 2026-02-20
 
 ### Added
