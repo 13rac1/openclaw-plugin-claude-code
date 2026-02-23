@@ -153,13 +153,16 @@ export class SessionManager {
 
   async deleteSession(sessionKey: string): Promise<void> {
     const sessionPath = this.sessionDir(sessionKey);
-    const workspacePath = this.workspaceDir(sessionKey);
 
     try {
       await fs.rm(sessionPath, { recursive: true, force: true });
     } catch (err) {
       console.log(`[session-manager] Failed to delete session directory ${sessionKey}:`, err);
     }
+  }
+
+  async deleteWorkspace(sessionKey: string): Promise<void> {
+    const workspacePath = this.workspaceDir(sessionKey);
 
     try {
       await fs.rm(workspacePath, { recursive: true, force: true });

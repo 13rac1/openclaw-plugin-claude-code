@@ -218,7 +218,7 @@ describe("SessionManager", () => {
   });
 
   describe("deleteSession", () => {
-    it("removes session and workspace directories", async () => {
+    it("removes session directory only, not workspace", async () => {
       mockFs.rm.mockResolvedValue(undefined);
 
       await manager.deleteSession("to-delete");
@@ -227,10 +227,10 @@ describe("SessionManager", () => {
         recursive: true,
         force: true,
       });
-      expect(mockFs.rm).toHaveBeenCalledWith("/var/openclaw/workspaces/to-delete", {
-        recursive: true,
-        force: true,
-      });
+      expect(mockFs.rm).not.toHaveBeenCalledWith(
+        expect.stringContaining("workspaces"),
+        expect.anything()
+      );
     });
 
     it("does not throw on rm errors", async () => {
@@ -238,6 +238,29 @@ describe("SessionManager", () => {
 
       // Should not throw
       await expect(manager.deleteSession("test")).resolves.toBeUndefined();
+    });
+  });
+
+  describe("deleteWorkspace", () => {
+    it("removes workspace directory only", async () => {
+      mockFs.rm.mockResolvedValue(undefined);
+
+      await manager.deleteWorkspace("to-delete");
+
+      expect(mockFs.rm).toHaveBeenCalledWith("/var/openclaw/workspaces/to-delete", {
+        recursive: true,
+        force: true,
+      });
+      expect(mockFs.rm).not.toHaveBeenCalledWith(
+        expect.stringContaining("sessions"),
+        expect.anything()
+      );
+    });
+
+    it("does not throw on rm errors", async () => {
+      mockFs.rm.mockRejectedValue(new Error("directory not found"));
+
+      await expect(manager.deleteWorkspace("test")).resolves.toBeUndefined();
     });
   });
 
@@ -362,10 +385,11 @@ describe("SessionManager", () => {
         recursive: true,
         force: true,
       });
-      expect(mockFs.rm).toHaveBeenCalledWith("/var/openclaw/workspaces/old-session", {
-        recursive: true,
-        force: true,
-      });
+      // Workspace should NOT be deleted by cleanup
+      expect(mockFs.rm).not.toHaveBeenCalledWith(
+        expect.stringContaining("workspaces"),
+        expect.anything()
+      );
       // Should not delete recent session
       expect(mockFs.rm).not.toHaveBeenCalledWith(
         expect.stringContaining("recent-session"),

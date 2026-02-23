@@ -1,6 +1,7 @@
 import { Type } from "@sinclair/typebox";
 import * as fs from "node:fs/promises";
 import { readFileSync } from "node:fs";
+import { execFile } from "node:child_process";
 import * as path from "node:path";
 import { homedir } from "node:os";
 import { SessionManager, type JobState } from "./session-manager.js";
@@ -137,6 +138,30 @@ export default function register(api: PluginApi): void {
       `[claude-code] Auth: hasCredsFile=${String(hasCredsFile)}, hasApiKey=${String(!!apiKey)}`
     );
     return { apiKey, hasCredsFile };
+  }
+
+  // Helper to read host git identity
+  async function getGitIdentity(): Promise<{ name: string; email: string }> {
+    const gitConfig = (key: string): Promise<string> =>
+      new Promise((resolve, reject) => {
+        execFile("git", ["config", "--global", key], (err, stdout) => {
+          if (err) {
+            reject(
+              new Error(
+                `Git identity not configured. Set it before using Claude Code:\n` +
+                  `  git config --global user.name "Your Name"\n` +
+                  `  git config --global user.email "you@example.com"`
+              )
+            );
+            return;
+          }
+          resolve(stdout.trim());
+        });
+      });
+
+    const name = await gitConfig("user.name");
+    const email = await gitConfig("user.email");
+    return { name, email };
   }
 
   // Find a job by ID, searching all sessions if session_id not provided
@@ -361,8 +386,9 @@ export default function register(api: PluginApi): void {
 
       const sessionKey = (params.session_id as string | undefined) ?? `session-${id}`;
 
-      // Check authentication
+      // Check authentication and git identity
       const { apiKey } = await getAuth();
+      const gitEnv = await getGitIdentity();
 
       // Verify container image exists
       const imageExists = await podmanRunner.checkImage();
@@ -407,6 +433,7 @@ export default function register(api: PluginApi): void {
           workspaceDir,
           resumeSessionId: session.claudeSessionId ?? undefined,
           apiKey,
+          gitEnv,
         });
 
         // Update job status to running
@@ -669,18 +696,41 @@ export default function register(api: PluginApi): void {
     name: "claude_code_cleanup",
     description:
       "Clean up idle Claude Code sessions. " +
-      "Removes sessions that have been inactive longer than the configured timeout.",
-    parameters: Type.Object({}),
-    async execute() {
+      "Removes session metadata for sessions inactive longer than the configured timeout. " +
+      "Workspace data (code, files, git history) is preserved by default. " +
+      "Set delete_workspaces to true to also delete workspace data permanently.",
+    parameters: Type.Object({
+      delete_workspaces: Type.Optional(
+        Type.Boolean({
+          description:
+            "Also delete workspace data (code, files, git history). Default false — only session metadata is removed.",
+        })
+      ),
+    }),
+    async execute(id, params) {
+      const deleteWorkspaces = (params.delete_workspaces as boolean | undefined) ?? false;
       const deleted = await sessionManager.cleanupIdleSessions();
 
-      const text =
-        deleted.length === 0
-          ? "No idle sessions to clean up."
-          : `Cleaned up ${String(deleted.length)} idle session(s): ${deleted.join(", ")}`;
+      if (deleteWorkspaces) {
+        for (const sessionKey of deleted) {
+          await sessionManager.deleteWorkspace(sessionKey);
+        }
+      }
+
+      const parts: string[] = [];
+      if (deleted.length === 0) {
+        parts.push("No idle sessions to clean up.");
+      } else {
+        parts.push(`Cleaned up ${String(deleted.length)} idle session(s): ${deleted.join(", ")}`);
+        if (deleteWorkspaces) {
+          parts.push("Workspace data was also deleted.");
+        } else {
+          parts.push("Workspace data was preserved.");
+        }
+      }
 
       return {
-        content: [{ type: "text", text }],
+        content: [{ type: "text", text: parts.join(" ") }],
       };
     },
   });

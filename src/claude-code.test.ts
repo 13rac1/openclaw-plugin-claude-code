@@ -3,11 +3,17 @@ import register from "./claude-code.js";
 import * as sessionManagerModule from "./session-manager.js";
 import * as podmanRunnerModule from "./podman-runner.js";
 import * as fs from "node:fs/promises";
+import * as childProcess from "node:child_process";
 
 // Mock dependencies
 vi.mock("./session-manager.js");
 vi.mock("./podman-runner.js");
 vi.mock("node:fs/promises");
+vi.mock("node:child_process", () => ({
+  execFile: vi.fn(),
+}));
+
+const mockExecFile = vi.mocked(childProcess.execFile);
 
 describe("register", () => {
   let mockApi: {
@@ -18,6 +24,7 @@ describe("register", () => {
     getOrCreateSession: Mock;
     updateSession: Mock;
     cleanupIdleSessions: Mock;
+    deleteWorkspace: Mock;
     listSessions: Mock;
     workspaceDir: Mock;
     getActiveJob: Mock;
@@ -50,6 +57,7 @@ describe("register", () => {
       getOrCreateSession: vi.fn(),
       updateSession: vi.fn(),
       cleanupIdleSessions: vi.fn(),
+      deleteWorkspace: vi.fn().mockResolvedValue(undefined),
       listSessions: vi.fn().mockResolvedValue([]),
       workspaceDir: vi.fn(),
       getActiveJob: vi.fn().mockResolvedValue(null),
@@ -82,6 +90,20 @@ describe("register", () => {
     vi.mocked(podmanRunnerModule.PodmanRunner).mockImplementation(
       () => mockPodmanRunner as unknown as podmanRunnerModule.PodmanRunner
     );
+
+    // Default: git identity configured
+    mockExecFile.mockImplementation((_cmd: string, args: unknown, callback: unknown) => {
+      const cb = callback as (err: Error | null, stdout: string) => void;
+      const gitArgs = args as string[];
+      if (gitArgs[1] === "--global" && gitArgs[2] === "user.name") {
+        cb(null, "Test User\n");
+      } else if (gitArgs[1] === "--global" && gitArgs[2] === "user.email") {
+        cb(null, "test@example.com\n");
+      } else {
+        cb(new Error("unknown git config key"), "");
+      }
+      return undefined as unknown as ReturnType<typeof childProcess.execFile>;
+    });
 
     mockApi = {
       config: {},
@@ -235,6 +257,70 @@ describe("register", () => {
 
       await expect(toolConfig.execute("test-id", { prompt: "hello" })).rejects.toThrow(
         "already has an active job"
+      );
+    });
+
+    it("throws error when git identity is not configured", async () => {
+      vi.mocked(fs.access).mockRejectedValue(new Error("ENOENT"));
+      process.env.ANTHROPIC_API_KEY = "test-key";
+
+      // Mock git config failing
+      mockExecFile.mockImplementation((_cmd: string, _args: unknown, callback: unknown) => {
+        const cb = callback as (err: Error | null, stdout: string) => void;
+        cb(new Error("exit code 1"), "");
+        return undefined as unknown as ReturnType<typeof childProcess.execFile>;
+      });
+
+      register(mockApi);
+
+      const toolConfig = mockApi.registerTool.mock.calls.find(
+        (call: unknown[]) => (call[0] as { name: string }).name === "claude_code_start"
+      )?.[0] as { execute: (id: string, params: Record<string, unknown>) => Promise<unknown> };
+
+      await expect(toolConfig.execute("test-id", { prompt: "hello" })).rejects.toThrow(
+        "Git identity not configured"
+      );
+    });
+
+    it("passes gitEnv to startDetached", async () => {
+      vi.mocked(fs.access).mockRejectedValue(new Error("ENOENT"));
+      process.env.ANTHROPIC_API_KEY = "test-key";
+      mockPodmanRunner.checkImage.mockResolvedValue(true);
+      mockSessionManager.getOrCreateSession.mockResolvedValue({
+        sessionKey: "session-test-id",
+        claudeSessionId: null,
+      });
+      mockSessionManager.getActiveJob.mockResolvedValue(null);
+      mockSessionManager.workspaceDir.mockReturnValue("/tmp/workspace");
+      mockSessionManager.createJob.mockResolvedValue({
+        jobId: "job-123",
+        sessionKey: "session-test-id",
+        status: "pending",
+      });
+      mockPodmanRunner.startDetached.mockResolvedValue({
+        containerName: "claude-session-test-id",
+        containerId: "abc123",
+      });
+      mockSessionManager.updateJob.mockResolvedValue({});
+      mockSessionManager.setActiveJob.mockResolvedValue({});
+
+      register(mockApi);
+
+      const toolConfig = mockApi.registerTool.mock.calls.find(
+        (call: unknown[]) => (call[0] as { name: string }).name === "claude_code_start"
+      )?.[0] as {
+        execute: (
+          id: string,
+          params: Record<string, unknown>
+        ) => Promise<{ content: { type: string; text: string }[] }>;
+      };
+
+      await toolConfig.execute("test-id", { prompt: "hello" });
+
+      expect(mockPodmanRunner.startDetached).toHaveBeenCalledWith(
+        expect.objectContaining({
+          gitEnv: { name: "Test User", email: "test@example.com" },
+        })
       );
     });
 
@@ -598,15 +684,18 @@ describe("register", () => {
       const toolConfig = mockApi.registerTool.mock.calls.find(
         (call: unknown[]) => (call[0] as { name: string }).name === "claude_code_cleanup"
       )?.[0] as {
-        execute: () => Promise<{ content: { type: string; text: string }[] }>;
+        execute: (
+          id: string,
+          params: Record<string, unknown>
+        ) => Promise<{ content: { type: string; text: string }[] }>;
       };
 
-      const result = await toolConfig.execute();
+      const result = await toolConfig.execute("test-id", {});
 
       expect(result.content[0].text).toBe("No idle sessions to clean up.");
     });
 
-    it("reports cleaned up sessions", async () => {
+    it("reports cleaned up sessions with workspaces preserved", async () => {
       mockSessionManager.cleanupIdleSessions.mockResolvedValue(["session-1", "session-2"]);
 
       register(mockApi);
@@ -614,13 +703,40 @@ describe("register", () => {
       const toolConfig = mockApi.registerTool.mock.calls.find(
         (call: unknown[]) => (call[0] as { name: string }).name === "claude_code_cleanup"
       )?.[0] as {
-        execute: () => Promise<{ content: { type: string; text: string }[] }>;
+        execute: (
+          id: string,
+          params: Record<string, unknown>
+        ) => Promise<{ content: { type: string; text: string }[] }>;
       };
 
-      const result = await toolConfig.execute();
+      const result = await toolConfig.execute("test-id", {});
 
       expect(result.content[0].text).toContain("Cleaned up 2 idle session(s)");
       expect(result.content[0].text).toContain("session-1, session-2");
+      expect(result.content[0].text).toContain("Workspace data was preserved.");
+      expect(mockSessionManager.deleteWorkspace).not.toHaveBeenCalled();
+    });
+
+    it("deletes workspaces when delete_workspaces is true", async () => {
+      mockSessionManager.cleanupIdleSessions.mockResolvedValue(["session-1", "session-2"]);
+
+      register(mockApi);
+
+      const toolConfig = mockApi.registerTool.mock.calls.find(
+        (call: unknown[]) => (call[0] as { name: string }).name === "claude_code_cleanup"
+      )?.[0] as {
+        execute: (
+          id: string,
+          params: Record<string, unknown>
+        ) => Promise<{ content: { type: string; text: string }[] }>;
+      };
+
+      const result = await toolConfig.execute("test-id", { delete_workspaces: true });
+
+      expect(result.content[0].text).toContain("Cleaned up 2 idle session(s)");
+      expect(result.content[0].text).toContain("Workspace data was also deleted.");
+      expect(mockSessionManager.deleteWorkspace).toHaveBeenCalledWith("session-1");
+      expect(mockSessionManager.deleteWorkspace).toHaveBeenCalledWith("session-2");
     });
   });
 

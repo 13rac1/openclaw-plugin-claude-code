@@ -497,6 +497,85 @@ describe("PodmanRunner", () => {
       vi.useFakeTimers();
     });
 
+    it("injects git env vars when gitEnv is provided", async () => {
+      vi.useRealTimers();
+
+      const mockKillProc = createMockProcess();
+      const mockRmProc = createMockProcess();
+      const mockRunProc = createMockProcess();
+
+      mockSpawn
+        .mockReturnValueOnce(mockKillProc)
+        .mockReturnValueOnce(mockRmProc)
+        .mockReturnValueOnce(mockRunProc);
+
+      const promise = runner.startDetached({
+        sessionKey: "git-test",
+        prompt: "test git env",
+        hostClaudeDir: "/path/.claude",
+        workspaceDir: "/path/workspace",
+        gitEnv: { name: "Jane Dev", email: "jane@dev.io" },
+      });
+
+      mockKillProc.emit("close", 0);
+      await new Promise((r) => setImmediate(r));
+      mockRmProc.emit("close", 0);
+      await new Promise((r) => setImmediate(r));
+
+      (mockRunProc.stdout as EventEmitter).emit("data", Buffer.from("container-id\n"));
+      mockRunProc.emit("close", 0);
+
+      await promise;
+
+      const runCall = mockSpawn.mock.calls[2];
+      const args = runCall[1] as string[];
+
+      expect(args).toContain("GIT_AUTHOR_NAME=Jane Dev");
+      expect(args).toContain("GIT_AUTHOR_EMAIL=jane@dev.io");
+      expect(args).toContain("GIT_COMMITTER_NAME=Jane Dev");
+      expect(args).toContain("GIT_COMMITTER_EMAIL=jane@dev.io");
+
+      vi.useFakeTimers();
+    });
+
+    it("omits git env vars when gitEnv is not provided", async () => {
+      vi.useRealTimers();
+
+      const mockKillProc = createMockProcess();
+      const mockRmProc = createMockProcess();
+      const mockRunProc = createMockProcess();
+
+      mockSpawn
+        .mockReturnValueOnce(mockKillProc)
+        .mockReturnValueOnce(mockRmProc)
+        .mockReturnValueOnce(mockRunProc);
+
+      const promise = runner.startDetached({
+        sessionKey: "no-git-test",
+        prompt: "test no git env",
+        hostClaudeDir: "/path/.claude",
+        workspaceDir: "/path/workspace",
+      });
+
+      mockKillProc.emit("close", 0);
+      await new Promise((r) => setImmediate(r));
+      mockRmProc.emit("close", 0);
+      await new Promise((r) => setImmediate(r));
+
+      (mockRunProc.stdout as EventEmitter).emit("data", Buffer.from("container-id\n"));
+      mockRunProc.emit("close", 0);
+
+      await promise;
+
+      const runCall = mockSpawn.mock.calls[2];
+      const args = runCall[1] as string[];
+
+      const gitArgs = args.filter((arg) => arg.startsWith("GIT_"));
+      expect(gitArgs).toHaveLength(0);
+
+      vi.useFakeTimers();
+    });
+
     it("mounts volumes with :rw instead of :U", async () => {
       vi.useRealTimers();
 

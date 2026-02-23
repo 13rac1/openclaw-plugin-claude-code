@@ -292,6 +292,7 @@ export class PodmanRunner {
     workspaceDir: string;
     resumeSessionId?: string;
     apiKey?: string;
+    gitEnv?: { name: string; email: string };
   }): Promise<DetachedStartResult> {
     const containerName = `claude-${params.sessionKey.replace(/[^a-zA-Z0-9-]/g, "-")}`;
 
@@ -336,6 +337,19 @@ export class PodmanRunner {
 
     if (params.apiKey) {
       args.push("-e", `ANTHROPIC_API_KEY=${params.apiKey}`);
+    }
+
+    if (params.gitEnv) {
+      args.push(
+        "-e",
+        `GIT_AUTHOR_NAME=${params.gitEnv.name}`,
+        "-e",
+        `GIT_AUTHOR_EMAIL=${params.gitEnv.email}`,
+        "-e",
+        `GIT_COMMITTER_NAME=${params.gitEnv.name}`,
+        "-e",
+        `GIT_COMMITTER_EMAIL=${params.gitEnv.email}`
+      );
     }
 
     args.push("-w", "/workspace", "--entrypoint", "/bin/bash", this.config.image, "-c", claudeCmd);
