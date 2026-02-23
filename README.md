@@ -408,6 +408,26 @@ Claude Code stopped producing output. This may indicate:
 
 The primary reason is rootless. Podman runs containers without root privileges by default, which is essential for a tool that executes arbitrary code from AI agents. Docker can run rootless too, but it requires additional setup and isn't the default mode.
 
+### Why use this plugin instead of the coding-agent skill?
+
+The built-in [coding-agent skill](https://github.com/openclaw/openclaw/blob/main/skills/coding-agent/SKILL.md) is a prompt that teaches an OpenClaw agent to delegate coding tasks using the platform's existing `bash` and `process` tools. It's lightweight, supports multiple agents (Codex, Claude Code, Pi), and requires zero setup beyond loading the skill.
+
+This plugin solves a different problem: **containment**. When Claude Code runs with `--dangerously-skip-permissions`, it can modify any file and run any command. The coding-agent skill runs those agents directly on your host (or in OpenClaw's sandbox), while this plugin runs each session in a rootless Podman container with all capabilities dropped, resource limits enforced, and `/tmp` mounted `noexec`.
+
+**Use the coding-agent skill when:**
+- You want multi-agent support (Codex, Claude Code, Pi)
+- Quick setup matters more than isolation
+- You're already comfortable with OpenClaw's sandbox mode
+- Tasks are short-lived and don't need session persistence
+
+**Use this plugin when:**
+- You're running Claude Code with `--dangerously-skip-permissions` and want real containment
+- You need persistent sessions that survive across multiple interactions
+- You want structured job management (status, output pagination, activity detection, crash recovery)
+- You're running untrusted or experimental code and need hard resource limits
+
+They can also work together: an agent could use the coding-agent skill for quick Codex tasks while routing longer Claude Code sessions through this plugin for isolation.
+
 ## License
 
 Apache-2.0 - see [LICENSE](LICENSE)
