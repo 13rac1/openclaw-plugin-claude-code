@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Remove `noexec` from `/tmp` tmpfs mount so compilers (Go, Rust, C) can execute test binaries
+- Increase `/tmp` tmpfs size from 64MB to 512MB for build artifacts
+
 ## [1.0.12] - 2026-02-23
 
 ### Added

@@ -328,7 +328,7 @@ export class PodmanRunner {
       "--pids-limit",
       "100",
       "--tmpfs",
-      "/tmp:rw,noexec,nosuid,size=64m",
+      "/tmp:rw,nosuid,size=512m",
       "-v",
       `${params.hostClaudeDir}:/home/claude/.claude:rw`,
       "-v",

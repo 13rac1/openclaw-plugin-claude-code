@@ -264,7 +264,7 @@ The plugin implements multiple layers of security:
 1. **Rootless Containers**: Uses Podman rootless mode by default
 2. **Capability Dropping**: All Linux capabilities are dropped (`--cap-drop ALL`)
 3. **Resource Limits**: Memory, CPU, and PID limits prevent resource exhaustion
-4. **tmpfs with noexec**: `/tmp` is mounted as tmpfs with `noexec,nosuid`
+4. **tmpfs**: `/tmp` is mounted as tmpfs with `nosuid` (512MB, exec allowed for compilers)
 5. **Network Isolation**: Configurable network mode (can be set to `none`)
 6. **AppArmor**: Optional AppArmor profile support for MAC enforcement
 
