@@ -11,6 +11,23 @@
 
 An [OpenClaw](https://openclaw.ai) plugin that executes [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI sessions in rootless Podman containers. Let your AI agents delegate complex coding tasks to Claude Code without risking your host system.
 
+## Table of Contents
+
+- [Why Use This Plugin?](#why-use-this-plugin)
+- [FAQ](#faq)
+- [Features](#features)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [Authentication](#authentication)
+- [Job Completion Notifications](#job-completion-notifications)
+- [Registered Tools](#registered-tools)
+- [Security](#security)
+- [Development](#development)
+- [Container Image](#container-image)
+- [Releasing](#releasing)
+- [Troubleshooting](#troubleshooting)
+
 ## Why Use This Plugin?
 
 ### Use Your Claude Max Credits
