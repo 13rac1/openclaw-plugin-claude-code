@@ -36,6 +36,36 @@ Run multiple Claude Code sessions simultaneously, each in its own isolated works
 
 Any OpenClaw agent can use the `claude_code_start` tool to offload coding tasks. The orchestrating agent stays lightweight while Claude Code handles the heavy lifting in its own container.
 
+## FAQ
+
+### Why Podman instead of Docker?
+
+**Security.** This plugin runs AI-generated code with `--dangerously-skip-permissions` — the container is your only safety net. Podman is rootless by default: no daemon, no root process, no privilege escalation path. If an AI agent escapes the container, it lands in an unprivileged user namespace with no capabilities.
+
+Docker's default mode runs a root daemon. A container escape from a root-daemon Docker setup gives the attacker **full root access to the host**. Docker *can* run rootless, but it requires [additional setup](https://docs.docker.com/engine/security/rootless/) and isn't the default. Most Docker forks of this plugin skip that step.
+
+The plugin supports `runtime: "docker"` for users who have configured rootless Docker, but Podman is strongly recommended.
+
+### Why use this plugin instead of the coding-agent skill?
+
+The built-in [coding-agent skill](https://github.com/openclaw/openclaw/blob/main/skills/coding-agent/SKILL.md) is a prompt that teaches an OpenClaw agent to delegate coding tasks using the platform's existing `bash` and `process` tools. It's lightweight, supports multiple agents (Codex, Claude Code, Pi), and requires zero setup beyond loading the skill.
+
+This plugin solves a different problem: **containment**. When Claude Code runs with `--dangerously-skip-permissions`, it can modify any file and run any command. The coding-agent skill runs those agents directly on your host (or in OpenClaw's sandbox), while this plugin runs each session in a rootless Podman container with all capabilities dropped, resource limits enforced, and `/tmp` mounted as tmpfs.
+
+**Use the coding-agent skill when:**
+- You want multi-agent support (Codex, Claude Code, Pi)
+- Quick setup matters more than isolation
+- You're already comfortable with OpenClaw's sandbox mode
+- Tasks are short-lived and don't need session persistence
+
+**Use this plugin when:**
+- You're running Claude Code with `--dangerously-skip-permissions` and want real containment
+- You need persistent sessions that survive across multiple interactions
+- You want structured job management (status, output pagination, activity detection, crash recovery)
+- You're running untrusted or experimental code and need hard resource limits
+
+They can also work together: an agent could use the coding-agent skill for quick Codex tasks while routing longer Claude Code sessions through this plugin for isolation.
+
 ## Features
 
 - **Isolated Execution**: Each Claude Code session runs in its own container with dropped capabilities
@@ -401,32 +431,6 @@ Claude Code stopped producing output. This may indicate:
 - Task completed but output wasn't captured
 - Claude Code is stuck
 - Task requires more time (increase `idleTimeout`)
-
-## FAQ
-
-### Why Podman?
-
-The primary reason is rootless. Podman runs containers without root privileges by default, which is essential for a tool that executes arbitrary code from AI agents. Docker can run rootless too, but it requires additional setup and isn't the default mode.
-
-### Why use this plugin instead of the coding-agent skill?
-
-The built-in [coding-agent skill](https://github.com/openclaw/openclaw/blob/main/skills/coding-agent/SKILL.md) is a prompt that teaches an OpenClaw agent to delegate coding tasks using the platform's existing `bash` and `process` tools. It's lightweight, supports multiple agents (Codex, Claude Code, Pi), and requires zero setup beyond loading the skill.
-
-This plugin solves a different problem: **containment**. When Claude Code runs with `--dangerously-skip-permissions`, it can modify any file and run any command. The coding-agent skill runs those agents directly on your host (or in OpenClaw's sandbox), while this plugin runs each session in a rootless Podman container with all capabilities dropped, resource limits enforced, and `/tmp` mounted `noexec`.
-
-**Use the coding-agent skill when:**
-- You want multi-agent support (Codex, Claude Code, Pi)
-- Quick setup matters more than isolation
-- You're already comfortable with OpenClaw's sandbox mode
-- Tasks are short-lived and don't need session persistence
-
-**Use this plugin when:**
-- You're running Claude Code with `--dangerously-skip-permissions` and want real containment
-- You need persistent sessions that survive across multiple interactions
-- You want structured job management (status, output pagination, activity detection, crash recovery)
-- You're running untrusted or experimental code and need hard resource limits
-
-They can also work together: an agent could use the coding-agent skill for quick Codex tasks while routing longer Claude Code sessions through this plugin for isolation.
 
 ## License
 
