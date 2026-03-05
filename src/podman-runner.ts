@@ -339,6 +339,19 @@ export class PodmanRunner {
       args.push("-e", `ANTHROPIC_API_KEY=${params.apiKey}`);
     }
 
+    // Pass through selected host env vars for compatible proxy/auth setups.
+    const passthroughEnvKeys = [
+      "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+      "ANTHROPIC_BASE_URL",
+      "ANTHROPIC_AUTH_TOKEN",
+    ] as const;
+    for (const key of passthroughEnvKeys) {
+      const value = process.env[key];
+      if (value && value.length > 0) {
+        args.push("-e", `${key}=${value}`);
+      }
+    }
+
     if (params.gitEnv) {
       args.push(
         "-e",
